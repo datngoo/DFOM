@@ -1,0 +1,67 @@
+App Purpose
+
+Build a personal iOS music/media app for learning mobile architecture and iOS development, allowing direct YouTube URL input, download, offline playback, and local media management.
+
+Target User
+
+Single user: myself.
+
+V1 Features
+
+paste a YouTube video URL
+
+resolve the URL into a specific media item
+
+open item details
+
+offer both audio and video download options
+
+show downloaded library
+
+play downloaded media offline
+
+persist downloaded items and metadata locally
+
+cache thumbnails locally for downloaded video items
+
+Out of Scope
+
+App Store release
+
+multi-user accounts
+
+comments/social features
+
+recommendation system
+
+cloud sync
+
+advanced UI polish
+
+Constraints
+
+iOS app only
+
+must run on real iPhone
+
+local storage required
+
+personal-use learning project
+
+data should remain available after app relaunch/rebuild where possible
+
+Success Criteria
+
+I can install the app on my iPhone
+
+I can paste a valid YouTube video URL
+
+I can resolve the URL into a media item
+
+I can download one audio item or one video item
+
+I can see it in my library
+
+I can play it offline
+
+The library remains after app relaunch
