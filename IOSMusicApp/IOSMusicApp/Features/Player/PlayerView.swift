@@ -1,7 +1,9 @@
 import AVFoundation
 import AVKit
+import MediaPlayer
 import OSLog
 import SwiftUI
+import UIKit
 
 enum PlaybackKind: String {
     case audio
@@ -84,6 +86,207 @@ final class PlaybackAudioSessionCoordinator {
             active=\(self.lastKnownActiveState, privacy: .public)
             """
         )
+    }
+}
+
+@MainActor
+final class BackgroundAudioCoordinator {
+    static let shared = BackgroundAudioCoordinator()
+
+    private let commandCenter = MPRemoteCommandCenter.shared()
+    private let nowPlayingInfoCenter = MPNowPlayingInfoCenter.default()
+
+    private var remoteCommandsRegistered = false
+    private var activeOwnerID: ObjectIdentifier?
+    private var playHandler: (() -> Void)?
+    private var pauseHandler: (() -> Void)?
+    private var previousTrackHandler: (() -> Void)?
+    private var nextTrackHandler: (() -> Void)?
+    private var lastPublishedElapsedTime: Double?
+
+    private init() {}
+
+    func attachRemoteCommands(
+        owner: AnyObject,
+        onPlay: @escaping () -> Void,
+        onPause: @escaping () -> Void,
+        onPreviousTrack: (() -> Void)? = nil,
+        onNextTrack: (() -> Void)? = nil
+    ) {
+        activeOwnerID = ObjectIdentifier(owner)
+        playHandler = onPlay
+        pauseHandler = onPause
+        previousTrackHandler = onPreviousTrack
+        nextTrackHandler = onNextTrack
+
+        if remoteCommandsRegistered {
+            updateTrackNavigationCommands()
+            return
+        }
+
+        remoteCommandsRegistered = true
+
+        // Keep remote controls minimal for the current offline audio feature scope.
+        commandCenter.playCommand.isEnabled = true
+        commandCenter.pauseCommand.isEnabled = true
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.changePlaybackPositionCommand.isEnabled = false
+        updateTrackNavigationCommands()
+
+        commandCenter.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.playHandler?()
+            }
+            return .success
+        }
+
+        commandCenter.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.pauseHandler?()
+            }
+            return .success
+        }
+
+        commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                guard let self else {
+                    return
+                }
+
+                if self.nowPlayingInfoCenter.playbackState == .playing {
+                    self.pauseHandler?()
+                } else {
+                    self.playHandler?()
+                }
+            }
+            return .success
+        }
+
+        commandCenter.previousTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.previousTrackHandler?()
+            }
+            return .success
+        }
+
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor in
+                self?.nextTrackHandler?()
+            }
+            return .success
+        }
+    }
+
+    func detachRemoteCommands(owner: AnyObject) {
+        guard activeOwnerID == ObjectIdentifier(owner) else {
+            return
+        }
+
+        activeOwnerID = nil
+        playHandler = nil
+        pauseHandler = nil
+        previousTrackHandler = nil
+        nextTrackHandler = nil
+        updateTrackNavigationCommands()
+        clearNowPlaying()
+    }
+
+    func updateTrackNavigationHandlers(
+        owner: AnyObject,
+        onPreviousTrack: (() -> Void)?,
+        onNextTrack: (() -> Void)?
+    ) {
+        guard activeOwnerID == ObjectIdentifier(owner) else {
+            return
+        }
+
+        previousTrackHandler = onPreviousTrack
+        nextTrackHandler = onNextTrack
+        updateTrackNavigationCommands()
+    }
+
+    func publishNowPlaying(
+        item: MediaItem,
+        fileStorage: LocalFileStorage,
+        elapsedTime: Double,
+        duration: Double,
+        isPlaying: Bool
+    ) {
+        var nowPlayingInfo = nowPlayingInfoCenter.nowPlayingInfo ?? [:]
+        nowPlayingInfo[MPMediaItemPropertyTitle] = item.title
+
+        if let creatorName = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !creatorName.isEmpty {
+            nowPlayingInfo[MPMediaItemPropertyArtist] = creatorName
+        } else {
+            nowPlayingInfo.removeValue(forKey: MPMediaItemPropertyArtist)
+        }
+
+        if duration.isFinite, duration > 0 {
+            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+        } else {
+            nowPlayingInfo.removeValue(forKey: MPMediaItemPropertyPlaybackDuration)
+        }
+
+        let sanitizedElapsedTime = max(elapsedTime, 0)
+        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = sanitizedElapsedTime
+        nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = isPlaying ? 1.0 : 0.0
+
+        if let artwork = artwork(for: item, fileStorage: fileStorage) {
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+        } else {
+            nowPlayingInfo.removeValue(forKey: MPMediaItemPropertyArtwork)
+        }
+
+        nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo
+        nowPlayingInfoCenter.playbackState = isPlaying ? .playing : .paused
+        lastPublishedElapsedTime = sanitizedElapsedTime
+    }
+
+    func publishElapsedTimeIfNeeded(
+        item: MediaItem,
+        fileStorage: LocalFileStorage,
+        elapsedTime: Double,
+        duration: Double,
+        isPlaying: Bool
+    ) {
+        let sanitizedElapsedTime = max(elapsedTime, 0)
+
+        // Avoid pushing lock-screen updates on every 250 ms player tick.
+        guard lastPublishedElapsedTime == nil || abs((lastPublishedElapsedTime ?? 0) - sanitizedElapsedTime) >= 1 else {
+            return
+        }
+
+        publishNowPlaying(
+            item: item,
+            fileStorage: fileStorage,
+            elapsedTime: sanitizedElapsedTime,
+            duration: duration,
+            isPlaying: isPlaying
+        )
+    }
+
+    func clearNowPlaying() {
+        nowPlayingInfoCenter.nowPlayingInfo = nil
+        nowPlayingInfoCenter.playbackState = .stopped
+        lastPublishedElapsedTime = nil
+    }
+
+    private func artwork(for item: MediaItem, fileStorage: LocalFileStorage) -> MPMediaItemArtwork? {
+        guard let thumbnailLocalPath = item.thumbnailLocalPath,
+              let thumbnailURL = try? fileStorage.resolveExistingManagedFileURL(from: thumbnailLocalPath),
+              let image = UIImage(contentsOfFile: thumbnailURL.path) else {
+            return nil
+        }
+
+        return MPMediaItemArtwork(boundsSize: image.size) { _ in
+            image
+        }
+    }
+
+    private func updateTrackNavigationCommands() {
+        commandCenter.previousTrackCommand.isEnabled = previousTrackHandler != nil
+        commandCenter.nextTrackCommand.isEnabled = nextTrackHandler != nil
     }
 }
 
@@ -172,22 +375,35 @@ final class AudioPlayerViewModel: ObservableObject {
     private var playWhenReady = false
     private var currentFileURL: URL?
     private let audioSessionCoordinator: PlaybackAudioSessionCoordinator
+    private let backgroundAudioCoordinator: BackgroundAudioCoordinator
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "AudioPlayerViewModel")
 
     init(item: MediaItem, playlist: [MediaItem] = [], fileStorage: LocalFileStorage) {
         let normalizedPlaylist = Self.normalizedPlaylist(for: item, from: playlist)
+        let initialIndex = Self.initialPlaylistIndex(for: item, in: normalizedPlaylist)
 
-        self.currentMediaItem = normalizedPlaylist[0]
-        self.currentPlaylistIndex = 0
+        self.currentMediaItem = normalizedPlaylist[initialIndex]
+        self.currentPlaylistIndex = initialIndex
         self.playlist = normalizedPlaylist
         self.fileStorage = fileStorage
         self.audioSessionCoordinator = .shared
-        self.title = normalizedPlaylist[0].title
+        self.backgroundAudioCoordinator = .shared
+        self.title = normalizedPlaylist[initialIndex].title
+
+        backgroundAudioCoordinator.attachRemoteCommands(
+            owner: self,
+            onPlay: { [weak self] in self?.play() },
+            onPause: { [weak self] in self?.pause() },
+            onPreviousTrack: { [weak self] in self?.playPreviousTrack() },
+            onNextTrack: { [weak self] in self?.playNextTrack() }
+        )
+        syncRemoteTrackNavigationAvailability()
     }
 
     deinit {
         MainActor.assumeIsolated {
             removeObservers()
+            backgroundAudioCoordinator.detachRemoteCommands(owner: self)
         }
     }
 
@@ -231,11 +447,13 @@ final class AudioPlayerViewModel: ObservableObject {
             """
         )
         player.play()
+        publishNowPlaying()
     }
 
     func pause() {
         playWhenReady = false
         player?.pause()
+        publishNowPlaying()
     }
 
     func seek(to time: Double) {
@@ -266,8 +484,24 @@ final class AudioPlayerViewModel: ObservableObject {
         playbackMode = playbackMode.next()
     }
 
+    func playPreviousTrack() {
+        navigateToAdjacentTrack(offset: -1)
+    }
+
+    func playNextTrack() {
+        navigateToAdjacentTrack(offset: 1)
+    }
+
     var canControlPlayback: Bool {
         errorMessage == nil && player != nil && duration >= 0
+    }
+
+    var canPlayPreviousTrack: Bool {
+        playlist.indices.contains(currentPlaylistIndex - 1)
+    }
+
+    var canPlayNextTrack: Bool {
+        playlist.indices.contains(currentPlaylistIndex + 1)
     }
 
     var displayedDuration: Double {
@@ -332,6 +566,7 @@ final class AudioPlayerViewModel: ObservableObject {
         currentTime = 0
         duration = 0
         installObservers(for: player, item: playerItem)
+        publishNowPlaying()
         Task {
             await logAssetDiagnostics(kind: .audio, fileURL: fileURL, asset: asset, player: player, logger: logger)
         }
@@ -385,6 +620,7 @@ final class AudioPlayerViewModel: ObservableObject {
             errorMessage = nil
             duration = resolvedDuration(from: currentPlayerItem)
             playbackStateText = playWhenReady ? "Playing" : "Ready"
+            publishNowPlaying()
 
             if playWhenReady {
                 player?.play()
@@ -414,15 +650,18 @@ final class AudioPlayerViewModel: ObservableObject {
                     playbackStateText = currentTime > 0 ? "Paused" : "Ready"
                 }
             }
+            publishNowPlaying()
         case .waitingToPlayAtSpecifiedRate:
             isPlaying = false
             if errorMessage == nil {
                 playbackStateText = "Buffering"
             }
+            publishNowPlaying()
         case .playing:
             isPlaying = true
             errorMessage = nil
             playbackStateText = "Playing"
+            publishNowPlaying()
         @unknown default:
             isPlaying = false
         }
@@ -435,6 +674,13 @@ final class AudioPlayerViewModel: ObservableObject {
 
         currentTime = max(time.seconds, 0)
         duration = max(duration, resolvedDuration(from: currentPlayerItem))
+        backgroundAudioCoordinator.publishElapsedTimeIfNeeded(
+            item: currentMediaItem,
+            fileStorage: fileStorage,
+            elapsedTime: currentTime,
+            duration: duration,
+            isPlaying: isPlaying
+        )
     }
 
     private func handlePlaybackEnded() {
@@ -445,6 +691,7 @@ final class AudioPlayerViewModel: ObservableObject {
             playWhenReady = false
             isPlaying = false
             playbackStateText = "Finished"
+            publishNowPlaying()
         case .repeatOne:
             restartCurrentTrack()
         case .repeatAll:
@@ -476,6 +723,7 @@ final class AudioPlayerViewModel: ObservableObject {
         errorMessage = message
         currentTime = 0
         duration = 0
+        backgroundAudioCoordinator.clearNowPlaying()
     }
 
     private func removeObservers() {
@@ -520,8 +768,21 @@ final class AudioPlayerViewModel: ObservableObject {
 
                 self.currentTime = 0
                 self.player?.play()
+                self.publishNowPlaying()
             }
         }
+    }
+
+    private func navigateToAdjacentTrack(offset: Int) {
+        let targetIndex = currentPlaylistIndex + offset
+        guard playlist.indices.contains(targetIndex) else {
+            return
+        }
+
+        currentPlaylistIndex = targetIndex
+        currentMediaItem = playlist[targetIndex]
+        syncRemoteTrackNavigationAvailability()
+        prepareCurrentTrack(autoplay: true)
     }
 
     private func playAdjacentTrack() {
@@ -537,6 +798,7 @@ final class AudioPlayerViewModel: ObservableObject {
         let nextIndex = (currentPlaylistIndex + 1) % playlist.count
         currentPlaylistIndex = nextIndex
         currentMediaItem = playlist[nextIndex]
+        syncRemoteTrackNavigationAvailability()
         prepareCurrentTrack(autoplay: true)
     }
 
@@ -558,6 +820,7 @@ final class AudioPlayerViewModel: ObservableObject {
 
         currentPlaylistIndex = nextIndex
         currentMediaItem = playlist[nextIndex]
+        syncRemoteTrackNavigationAvailability()
         prepareCurrentTrack(autoplay: true)
     }
 
@@ -568,14 +831,33 @@ final class AudioPlayerViewModel: ObservableObject {
             $0.localFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }
 
-        if let currentIndex = playableItems.firstIndex(where: { $0.id == item.id }) {
-            var reorderedItems = playableItems
-            let currentItem = reorderedItems.remove(at: currentIndex)
-            reorderedItems.insert(currentItem, at: 0)
-            return reorderedItems
+        if playableItems.contains(where: { $0.id == item.id }) {
+            return playableItems
         }
 
         return [item] + playableItems.filter { $0.id != item.id }
+    }
+
+    private static func initialPlaylistIndex(for item: MediaItem, in playlist: [MediaItem]) -> Int {
+        playlist.firstIndex(where: { $0.id == item.id }) ?? 0
+    }
+
+    private func publishNowPlaying() {
+        backgroundAudioCoordinator.publishNowPlaying(
+            item: currentMediaItem,
+            fileStorage: fileStorage,
+            elapsedTime: currentTime,
+            duration: duration,
+            isPlaying: isPlaying
+        )
+    }
+
+    private func syncRemoteTrackNavigationAvailability() {
+        backgroundAudioCoordinator.updateTrackNavigationHandlers(
+            owner: self,
+            onPreviousTrack: canPlayPreviousTrack ? { [weak self] in self?.playPreviousTrack() } : nil,
+            onNextTrack: canPlayNextTrack ? { [weak self] in self?.playNextTrack() } : nil
+        )
     }
 }
 
@@ -631,6 +913,12 @@ struct AudioPlayerView: View {
             .disabled(!viewModel.canControlPlayback)
 
             HStack(spacing: 12) {
+                Button("Previous") {
+                    viewModel.playPreviousTrack()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canPlayPreviousTrack)
+
                 Button("Play") {
                     viewModel.play()
                 }
@@ -642,6 +930,12 @@ struct AudioPlayerView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!viewModel.canControlPlayback || !viewModel.isPlaying)
+
+                Button("Next") {
+                    viewModel.playNextTrack()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canPlayNextTrack)
             }
 
             Spacer()
@@ -662,14 +956,18 @@ final class VideoPlayerViewModel: ObservableObject {
     private let item: MediaItem
     private let fileStorage: LocalFileStorage
     private let audioSessionCoordinator: PlaybackAudioSessionCoordinator
+    private let backgroundAudioCoordinator: BackgroundAudioCoordinator
     private var didPreparePlayer = false
     private var currentPlayerItem: AVPlayerItem?
+    private var timeObserverToken: Any?
     private var itemStatusObservation: NSKeyValueObservation?
     private var timeControlStatusObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var currentFileURL: URL?
     private var isReadyToPlay = false
     private var playWhenReady = false
+    private var currentTime: Double = 0
+    private var duration: Double = 0
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "VideoPlayerViewModel")
 
     let title: String
@@ -679,12 +977,21 @@ final class VideoPlayerViewModel: ObservableObject {
         self.item = item
         self.fileStorage = fileStorage
         self.audioSessionCoordinator = .shared
+        self.backgroundAudioCoordinator = .shared
         self.title = item.title
+        self.player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+
+        backgroundAudioCoordinator.attachRemoteCommands(
+            owner: self,
+            onPlay: { [weak self] in self?.play() },
+            onPause: { [weak self] in self?.pause() }
+        )
     }
 
     deinit {
-        if let endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
+        MainActor.assumeIsolated {
+            removeObservers()
+            backgroundAudioCoordinator.detachRemoteCommands(owner: self)
         }
     }
 
@@ -733,9 +1040,14 @@ final class VideoPlayerViewModel: ObservableObject {
     func pause() {
         playWhenReady = false
         player.pause()
+        publishNowPlaying()
     }
 
-    func handleDisappear() {
+    func handleDisappear(scenePhase: ScenePhase) {
+        guard scenePhase == .active else {
+            return
+        }
+
         pause()
     }
 
@@ -783,11 +1095,15 @@ final class VideoPlayerViewModel: ObservableObject {
             currentPlayerItem = playerItem
             isReadyToPlay = false
             playWhenReady = false
+            currentTime = 0
+            duration = 0
             player.isMuted = false
+            player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
             player.replaceCurrentItem(with: playerItem)
             installObservers(for: player, item: playerItem)
             errorMessage = nil
             playbackStateText = "Loading"
+            publishNowPlaying()
 
             Task {
                 await logAssetDiagnostics(kind: .video, fileURL: fileURL, asset: asset, player: player, logger: logger)
@@ -811,6 +1127,15 @@ final class VideoPlayerViewModel: ObservableObject {
             }
         }
 
+        timeObserverToken = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            Task { @MainActor in
+                self?.handlePeriodicTimeUpdate(time)
+            }
+        }
+
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -825,6 +1150,11 @@ final class VideoPlayerViewModel: ObservableObject {
     private func removeObservers() {
         itemStatusObservation = nil
         timeControlStatusObservation = nil
+
+        if let timeObserverToken {
+            player.removeTimeObserver(timeObserverToken)
+            self.timeObserverToken = nil
+        }
 
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -845,7 +1175,9 @@ final class VideoPlayerViewModel: ObservableObject {
         case .readyToPlay:
             isReadyToPlay = true
             errorMessage = nil
+            duration = resolvedDuration(from: currentPlayerItem)
             playbackStateText = player.timeControlStatus == .playing ? "Playing" : "Ready"
+            publishNowPlaying()
 
             if playWhenReady {
                 play()
@@ -870,21 +1202,32 @@ final class VideoPlayerViewModel: ObservableObject {
             if errorMessage == nil {
                 playbackStateText = isReadyToPlay ? "Ready" : "Loading"
             }
+            publishNowPlaying()
         case .waitingToPlayAtSpecifiedRate:
             if errorMessage == nil {
                 playbackStateText = "Buffering"
             }
+            publishNowPlaying()
         case .playing:
             errorMessage = nil
             playbackStateText = "Playing"
+            publishNowPlaying()
         @unknown default:
             break
         }
     }
 
+    private func handlePeriodicTimeUpdate(_ time: CMTime) {
+        currentTime = max(time.seconds, 0)
+        duration = max(duration, resolvedDuration(from: currentPlayerItem))
+        publishNowPlaying()
+    }
+
     private func handlePlaybackEnded() {
         playWhenReady = false
         playbackStateText = "Finished"
+        currentTime = duration
+        publishNowPlaying()
     }
 
     private func setError(_ message: String) {
@@ -896,11 +1239,38 @@ final class VideoPlayerViewModel: ObservableObject {
         currentPlayerItem = nil
         errorMessage = message
         playbackStateText = "Unavailable"
+        currentTime = 0
+        duration = 0
+        backgroundAudioCoordinator.clearNowPlaying()
+    }
+
+    private func resolvedDuration(from item: AVPlayerItem?) -> Double {
+        guard let item else {
+            return 0
+        }
+
+        let seconds = item.duration.seconds
+        guard seconds.isFinite, seconds > 0 else {
+            return 0
+        }
+
+        return seconds
+    }
+
+    private func publishNowPlaying() {
+        backgroundAudioCoordinator.publishNowPlaying(
+            item: item,
+            fileStorage: fileStorage,
+            elapsedTime: currentTime,
+            duration: duration,
+            isPlaying: player.timeControlStatus == .playing
+        )
     }
 }
 
 struct VideoPlayerView: View {
     @StateObject private var viewModel: VideoPlayerViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
     init(item: MediaItem, fileStorage: LocalFileStorage = ApplicationSupportFileStorage()) {
         _viewModel = StateObject(wrappedValue: VideoPlayerViewModel(item: item, fileStorage: fileStorage))
@@ -941,7 +1311,9 @@ struct VideoPlayerView: View {
         .navigationTitle("Video Player")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: viewModel.prepareIfNeeded)
-        .onDisappear(perform: viewModel.handleDisappear)
+        .onDisappear {
+            viewModel.handleDisappear(scenePhase: scenePhase)
+        }
     }
 }
 
