@@ -4,6 +4,15 @@ import UIKit
 import OSLog
 
 struct LibraryView: View {
+    private enum Layout {
+        static let screenPadding: CGFloat = 16
+        static let sectionSpacing: CGFloat = 16
+        static let itemSpacing: CGFloat = 12
+        static let smallSpacing: CGFloat = 8
+        static let cardCornerRadius: CGFloat = 16
+        static let cardPadding: CGFloat = 14
+    }
+
     @Environment(\.modelContext) private var modelContext
     @Query(
         sort: [
@@ -353,6 +362,14 @@ private struct MediaItemRow: View {
 }
 
 private struct LibraryMediaDetailView: View {
+    private enum Layout {
+        static let screenPadding: CGFloat = 16
+        static let sectionSpacing: CGFloat = 16
+        static let itemSpacing: CGFloat = 10
+        static let cardPadding: CGFloat = 14
+        static let cardCornerRadius: CGFloat = 16
+    }
+
     @Query(
         sort: [
             SortDescriptor(\Playlist.createdDate, order: .reverse),
@@ -377,10 +394,10 @@ private struct LibraryMediaDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
                 MediaItemRow(item: item, fileStorage: fileStorage)
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: Layout.itemSpacing) {
                     if isPlayableAudioItem(item) {
                         NavigationLink {
                             AudioPlayerView(
@@ -393,6 +410,7 @@ private struct LibraryMediaDetailView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     } else if isPlayableVideoItem(item) {
                         NavigationLink {
                             VideoPlayerView(item: item, fileStorage: fileStorage)
@@ -401,6 +419,7 @@ private struct LibraryMediaDetailView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     }
 
                     if canAddToPlaylist(item) {
@@ -411,10 +430,11 @@ private struct LibraryMediaDetailView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .controlSize(.regular)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: Layout.itemSpacing) {
                     DetailValueRow(label: "Creator", value: item.creatorName ?? "Unknown creator")
                     DetailValueRow(label: "Type", value: item.mediaType.rawValue.capitalized)
                     DetailValueRow(label: "Status", value: statusLabel)
@@ -423,13 +443,14 @@ private struct LibraryMediaDetailView: View {
                         DetailValueRow(label: "Local Path", value: localFilePath)
                     }
                 }
-                .padding()
+                .padding(Layout.cardPadding)
                 .background(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
                         .fill(Color(.secondarySystemBackground))
                 )
             }
-            .padding()
+            .padding(.horizontal, Layout.screenPadding)
+            .padding(.vertical, Layout.screenPadding)
         }
         .navigationTitle("Detail")
         .navigationBarTitleDisplayMode(.inline)
@@ -501,6 +522,7 @@ private struct DetailValueRow: View {
             Text(value)
                 .font(.subheadline)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

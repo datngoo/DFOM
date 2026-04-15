@@ -25,24 +25,40 @@ struct URLInputView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        TextField("https://www.youtube.com/watch?v=...", text: $viewModel.urlText, axis: .vertical)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
-                            .autocorrectionDisabled()
-                            .padding(12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color(.separator), lineWidth: 1)
-                            )
-                            .onSubmit {
-                                Task {
-                                    await viewModel.resolve()
+                        HStack(alignment: .center, spacing: 8) {
+                            TextField("https://www.youtube.com/watch?v=...", text: $viewModel.urlText, axis: .vertical)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                .autocorrectionDisabled()
+                                .onSubmit {
+                                    Task {
+                                        await viewModel.resolve()
+                                    }
                                 }
+
+                            if !viewModel.urlText.isEmpty {
+                                Button {
+                                    viewModel.urlText = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(.secondary)
+                                        .opacity(0.75)
+                                        .padding(2)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Clear URL")
                             }
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color(.separator), lineWidth: 1)
+                        )
 
                         HStack(spacing: 12) {
                             Button("Paste") {
