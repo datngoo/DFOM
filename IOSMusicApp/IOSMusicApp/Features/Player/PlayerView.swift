@@ -1074,12 +1074,13 @@ struct AudioPlayerView: View {
 
 struct GlobalAudioMiniPlayer: View {
     private enum Layout {
-        static let contentSpacing: CGFloat = 8
-        static let horizontalPadding: CGFloat = 14
-        static let verticalPadding: CGFloat = 10
-        static let buttonSize: CGFloat = 34
-        static let cornerRadius: CGFloat = 18
+        static let contentSpacing: CGFloat = 9
+        static let horizontalPadding: CGFloat = 15
+        static let verticalPadding: CGFloat = 11
+        static let buttonSize: CGFloat = 36
+        static let cornerRadius: CGFloat = 20
         static let progressHeight: CGFloat = 3
+        static let progressCornerRadius: CGFloat = 2
     }
 
     @EnvironmentObject private var playbackController: AudioPlaybackController
@@ -1104,35 +1105,73 @@ struct GlobalAudioMiniPlayer: View {
                             Image(systemName: playbackController.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.subheadline.weight(.bold))
                                 .frame(width: Layout.buttonSize, height: Layout.buttonSize)
+                                .foregroundStyle(.primary)
                                 .background(
                                     Circle()
-                                        .fill(Color.accentColor.opacity(0.14))
+                                        .fill(Color.white.opacity(0.18))
+                                )
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
                                 )
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
                     }
 
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.primary.opacity(0.12))
+                                .fill(Color.white.opacity(0.18))
 
                             Capsule()
-                                .fill(Color.accentColor.opacity(0.9))
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.accentColor.opacity(0.92),
+                                            Color.accentColor.opacity(0.72)
+                                        ],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
                                 .frame(width: max(proxy.size.width * playbackController.progressFraction, 6))
                         }
                     }
                     .frame(height: Layout.progressHeight)
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: Layout.progressCornerRadius,
+                            style: .continuous
+                        )
+                    )
                 }
                 .padding(.horizontal, Layout.horizontalPadding)
                 .padding(.vertical, Layout.verticalPadding)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
+                .background(
+                    RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.22), lineWidth: 1)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.35),
+                                    Color.white.opacity(0.1)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.9
+                        )
                 )
-                .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+                .overlay(alignment: .top) {
+                    RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        .blur(radius: 0.3)
+                }
+                .shadow(color: Color.black.opacity(0.12), radius: 14, y: 7)
+                .shadow(color: Color.black.opacity(0.04), radius: 2, y: 1)
             }
             .buttonStyle(.plain)
             .contentShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
