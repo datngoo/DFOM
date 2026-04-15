@@ -10,7 +10,7 @@ enum PlaybackKind: String {
     case video
 }
 
-enum PlaybackMode: CaseIterable {
+enum PlaybackMode: String, CaseIterable {
     case playOnce
     case repeatAll
     case repeatOne
@@ -350,70 +350,91 @@ private func logAssetDiagnostics(
 }
 
 @MainActor
-final class AudioPlayerViewModel: ObservableObject {
-    @Published var title: String
-    @Published var playbackStateText = "Preparing"
+final class AudioPlaybackController: ObservableObject {
+    static let shared = AudioPlaybackController()
+
+    @Published var title = "Audio Player"
+    @Published var playbackStateText = "No audio selected"
     @Published var errorMessage: String?
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var isPlaying = false
-    @Published var playbackMode: PlaybackMode = .playOnce
+    @Published private(set) var playbackMode: PlaybackMode
+    @Published private(set) var currentMediaItem: MediaItem?
+    @Published var isPlayerPresented = false
 
-    private let playlist: [MediaItem]
-    private let fileStorage: LocalFileStorage
+    private static let playbackModeDefaultsKey = "AudioPlaybackController.playbackMode"
+
+    private var playlist: [MediaItem] = []
+    private var fileStorage: LocalFileStorage
     private var player: AVPlayer?
-    private var currentMediaItem: MediaItem
-    private var currentPlaylistIndex: Int
+    private var currentPlaylistIndex = 0
     private var currentPlayerItem: AVPlayerItem?
     private var timeObserverToken: Any?
     private var itemStatusObservation: NSKeyValueObservation?
     private var timeControlStatusObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
-    private var didPreparePlayer = false
     private var isSeeking = false
     private var isReadyToPlay = false
     private var playWhenReady = false
     private var currentFileURL: URL?
     private let audioSessionCoordinator: PlaybackAudioSessionCoordinator
     private let backgroundAudioCoordinator: BackgroundAudioCoordinator
-    private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "AudioPlayerViewModel")
+    private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "AudioPlaybackController")
 
-    init(item: MediaItem, playlist: [MediaItem] = [], fileStorage: LocalFileStorage) {
-        let normalizedPlaylist = Self.normalizedPlaylist(for: item, from: playlist)
-        let initialIndex = Self.initialPlaylistIndex(for: item, in: normalizedPlaylist)
-
-        self.currentMediaItem = normalizedPlaylist[initialIndex]
-        self.currentPlaylistIndex = initialIndex
-        self.playlist = normalizedPlaylist
+    private init(fileStorage: LocalFileStorage = ApplicationSupportFileStorage()) {
         self.fileStorage = fileStorage
         self.audioSessionCoordinator = .shared
         self.backgroundAudioCoordinator = .shared
-        self.title = normalizedPlaylist[initialIndex].title
-
-        backgroundAudioCoordinator.attachRemoteCommands(
-            owner: self,
-            onPlay: { [weak self] in self?.play() },
-            onPause: { [weak self] in self?.pause() },
-            onPreviousTrack: { [weak self] in self?.playPreviousTrack() },
-            onNextTrack: { [weak self] in self?.playNextTrack() }
-        )
-        syncRemoteTrackNavigationAvailability()
+        self.playbackMode = Self.loadPersistedPlaybackMode()
+        ensureRemoteCommandsAttached()
     }
 
     deinit {
         MainActor.assumeIsolated {
             removeObservers()
-            backgroundAudioCoordinator.detachRemoteCommands(owner: self)
         }
     }
 
-    func prepareIfNeeded() {
-        guard !didPreparePlayer else {
+    func configure(
+        item: MediaItem,
+        playlist: [MediaItem] = [],
+        fileStorage: LocalFileStorage? = nil
+    ) {
+        if let fileStorage {
+            self.fileStorage = fileStorage
+        }
+
+        let normalizedPlaylist = Self.normalizedPlaylist(for: item, from: playlist)
+        let targetIndex = Self.initialPlaylistIndex(for: item, in: normalizedPlaylist)
+        let targetItem = normalizedPlaylist[targetIndex]
+
+        self.playlist = normalizedPlaylist
+        self.currentPlaylistIndex = targetIndex
+        ensureRemoteCommandsAttached()
+        syncRemoteTrackNavigationAvailability()
+
+        if currentMediaItem?.id == targetItem.id, player != nil {
+            currentMediaItem = targetItem
+            title = targetItem.title
+            errorMessage = nil
             return
         }
 
-        didPreparePlayer = true
+        currentMediaItem = targetItem
         prepareCurrentTrack()
+    }
+
+    func presentFullPlayer() {
+        guard currentMediaItem != nil else {
+            return
+        }
+
+        isPlayerPresented = true
+    }
+
+    func dismissFullPlayer() {
+        isPlayerPresented = false
     }
 
     func play() {
@@ -421,12 +442,13 @@ final class AudioPlayerViewModel: ObservableObject {
             return
         }
 
+        ensureRemoteCommandsAttached()
         playWhenReady = true
 
         do {
             try audioSessionCoordinator.activateForPlayback(kind: .audio, fileURL: currentFileURL)
         } catch {
-            logger.error("Audio session reactivation failed for item \(self.currentMediaItem.id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            logger.error("Audio session reactivation failed for item \(self.currentMediaItem?.id.uuidString ?? "unknown", privacy: .public): \(String(describing: error), privacy: .public)")
             setError("Audio session could not be activated: \(error.localizedDescription)")
             return
         }
@@ -451,9 +473,14 @@ final class AudioPlayerViewModel: ObservableObject {
     }
 
     func pause() {
+        ensureRemoteCommandsAttached()
         playWhenReady = false
         player?.pause()
         publishNowPlaying()
+    }
+
+    func togglePlayback() {
+        isPlaying ? pause() : play()
     }
 
     func seek(to time: Double) {
@@ -476,12 +503,8 @@ final class AudioPlayerViewModel: ObservableObject {
         }
     }
 
-    func handleDisappear() {
-        pause()
-    }
-
     func cyclePlaybackMode() {
-        playbackMode = playbackMode.next()
+        updatePlaybackMode(playbackMode.next())
     }
 
     func playPreviousTrack() {
@@ -493,7 +516,7 @@ final class AudioPlayerViewModel: ObservableObject {
     }
 
     var canControlPlayback: Bool {
-        errorMessage == nil && player != nil && duration >= 0
+        currentMediaItem != nil && errorMessage == nil && player != nil && duration >= 0
     }
 
     var canPlayPreviousTrack: Bool {
@@ -508,6 +531,14 @@ final class AudioPlayerViewModel: ObservableObject {
         duration > 0 ? duration : max(currentTime, 1)
     }
 
+    var progressFraction: Double {
+        guard duration > 0 else {
+            return 0
+        }
+
+        return min(max(currentTime / duration, 0), 1)
+    }
+
     func formattedTime(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else {
             return "00:00"
@@ -520,7 +551,9 @@ final class AudioPlayerViewModel: ObservableObject {
     }
 
     private func prepareCurrentTrack(autoplay: Bool = false) {
-        let item = currentMediaItem
+        guard let item = currentMediaItem else {
+            return
+        }
 
         guard item.localFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             setError("Audio file path is missing.")
@@ -542,8 +575,8 @@ final class AudioPlayerViewModel: ObservableObject {
         logger.debug("Audio playback local file URL: \(fileURL.path, privacy: .public)")
 
         let asset = AVURLAsset(url: fileURL)
-        let playerItem = AVPlayerItem(asset: asset)
         let player = player ?? AVPlayer()
+        let playerItem = AVPlayerItem(asset: asset)
         player.isMuted = false
 
         do {
@@ -554,6 +587,7 @@ final class AudioPlayerViewModel: ObservableObject {
             return
         }
 
+        ensureRemoteCommandsAttached()
         removeObservers()
         self.player = player
         isReadyToPlay = false
@@ -626,7 +660,7 @@ final class AudioPlayerViewModel: ObservableObject {
                 player?.play()
             }
         case .failed:
-            logger.error("Audio player item failed for item \(self.currentMediaItem.id.uuidString, privacy: .public): \(String(describing: error ?? self.currentPlayerItem?.error), privacy: .public)")
+            logger.error("Audio player item failed for item \(self.currentMediaItem?.id.uuidString ?? "unknown", privacy: .public): \(String(describing: error ?? self.currentPlayerItem?.error), privacy: .public)")
             setError(error?.localizedDescription ?? self.currentPlayerItem?.error?.localizedDescription ?? "Audio player item failed to load.")
         case .unknown:
             isReadyToPlay = false
@@ -668,7 +702,7 @@ final class AudioPlayerViewModel: ObservableObject {
     }
 
     private func handlePeriodicTimeUpdate(_ time: CMTime) {
-        guard !isSeeking else {
+        guard !isSeeking, let currentMediaItem else {
             return
         }
 
@@ -751,7 +785,7 @@ final class AudioPlayerViewModel: ObservableObject {
         do {
             try audioSessionCoordinator.activateForPlayback(kind: .audio, fileURL: currentFileURL)
         } catch {
-            logger.error("Audio session reactivation failed for repeated item \(self.currentMediaItem.id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+            logger.error("Audio session reactivation failed for repeated item \(self.currentMediaItem?.id.uuidString ?? "unknown", privacy: .public): \(String(describing: error), privacy: .public)")
             setError("Audio session could not be activated: \(error.localizedDescription)")
             return
         }
@@ -843,6 +877,10 @@ final class AudioPlayerViewModel: ObservableObject {
     }
 
     private func publishNowPlaying() {
+        guard let currentMediaItem else {
+            return
+        }
+
         backgroundAudioCoordinator.publishNowPlaying(
             item: currentMediaItem,
             fileStorage: fileStorage,
@@ -859,92 +897,246 @@ final class AudioPlayerViewModel: ObservableObject {
             onNextTrack: canPlayNextTrack ? { [weak self] in self?.playNextTrack() } : nil
         )
     }
+
+    private func ensureRemoteCommandsAttached() {
+        backgroundAudioCoordinator.attachRemoteCommands(
+            owner: self,
+            onPlay: { [weak self] in self?.play() },
+            onPause: { [weak self] in self?.pause() },
+            onPreviousTrack: { [weak self] in self?.playPreviousTrack() },
+            onNextTrack: { [weak self] in self?.playNextTrack() }
+        )
+    }
+
+    private func updatePlaybackMode(_ mode: PlaybackMode) {
+        playbackMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.playbackModeDefaultsKey)
+    }
+
+    private static func loadPersistedPlaybackMode() -> PlaybackMode {
+        guard let rawValue = UserDefaults.standard.string(forKey: playbackModeDefaultsKey),
+              let mode = PlaybackMode(rawValue: rawValue) else {
+            return .playOnce
+        }
+
+        return mode
+    }
 }
 
 struct AudioPlayerView: View {
-    @StateObject private var viewModel: AudioPlayerViewModel
+    @EnvironmentObject private var playbackController: AudioPlaybackController
+
+    private let item: MediaItem?
+    private let playlist: [MediaItem]
+    private let fileStorage: LocalFileStorage
 
     init(
-        item: MediaItem,
+        item: MediaItem? = nil,
         playlist: [MediaItem] = [],
         fileStorage: LocalFileStorage = ApplicationSupportFileStorage()
     ) {
-        _viewModel = StateObject(
-            wrappedValue: AudioPlayerViewModel(item: item, playlist: playlist, fileStorage: fileStorage)
-        )
+        self.item = item
+        self.playlist = playlist
+        self.fileStorage = fileStorage
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(viewModel.title)
+            Text(playbackController.title)
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text(viewModel.errorMessage ?? viewModel.playbackStateText)
+            Text(playbackController.errorMessage ?? playbackController.playbackStateText)
                 .font(.body)
-                .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
+                .foregroundStyle(playbackController.errorMessage == nil ? Color.secondary : Color.red)
 
             VStack(spacing: 12) {
                 Slider(
                     value: Binding(
-                        get: { min(viewModel.currentTime, viewModel.displayedDuration) },
-                        set: { viewModel.seek(to: $0) }
+                        get: { min(playbackController.currentTime, playbackController.displayedDuration) },
+                        set: { playbackController.seek(to: $0) }
                     ),
-                    in: 0...viewModel.displayedDuration
+                    in: 0...playbackController.displayedDuration
                 )
-                .disabled(!viewModel.canControlPlayback || viewModel.displayedDuration <= 0)
+                .disabled(!playbackController.canControlPlayback || playbackController.displayedDuration <= 0)
 
                 HStack {
-                    Text(viewModel.formattedTime(viewModel.currentTime))
+                    Text(playbackController.formattedTime(playbackController.currentTime))
                     Spacer()
-                    Text(viewModel.formattedTime(viewModel.duration))
+                    Text(playbackController.formattedTime(playbackController.duration))
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
 
             Button {
-                viewModel.cyclePlaybackMode()
+                playbackController.cyclePlaybackMode()
             } label: {
-                Label(viewModel.playbackMode.title, systemImage: viewModel.playbackMode.symbolName)
+                Label(playbackController.playbackMode.title, systemImage: playbackController.playbackMode.symbolName)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(!viewModel.canControlPlayback)
+            .disabled(!playbackController.canControlPlayback)
 
-            HStack(spacing: 12) {
-                Button("Previous") {
-                    viewModel.playPreviousTrack()
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.canPlayPreviousTrack)
+            VStack(spacing: 18) {
+                Text("Playback Controls")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
-                Button("Play") {
-                    viewModel.play()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!viewModel.canControlPlayback)
+                HStack(spacing: 20) {
+                    playerControlButton(
+                        systemName: "backward.fill",
+                        size: 52,
+                        isPrimary: false,
+                        isDisabled: !playbackController.canPlayPreviousTrack
+                    ) {
+                        playbackController.playPreviousTrack()
+                    }
 
-                Button("Pause") {
-                    viewModel.pause()
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.canControlPlayback || !viewModel.isPlaying)
+                    playerControlButton(
+                        systemName: playbackController.isPlaying ? "pause.fill" : "play.fill",
+                        size: 62,
+                        isPrimary: true,
+                        isDisabled: !playbackController.canControlPlayback
+                    ) {
+                        playbackController.togglePlayback()
+                    }
 
-                Button("Next") {
-                    viewModel.playNextTrack()
+                    playerControlButton(
+                        systemName: "forward.fill",
+                        size: 52,
+                        isPrimary: false,
+                        isDisabled: !playbackController.canPlayNextTrack
+                    ) {
+                        playbackController.playNextTrack()
+                    }
                 }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.canPlayNextTrack)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
+            )
 
             Spacer()
         }
         .padding()
         .navigationTitle("Audio Player")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: viewModel.prepareIfNeeded)
-        .onDisappear(perform: viewModel.handleDisappear)
+        .onAppear {
+            if let item {
+                playbackController.configure(item: item, playlist: playlist, fileStorage: fileStorage)
+            }
+        }
+    }
+
+    private func playerControlButton(
+        systemName: String,
+        size: CGFloat,
+        isPrimary: Bool,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(isPrimary ? .title3.weight(.semibold) : .headline.weight(.semibold))
+                .frame(width: size, height: size)
+                .foregroundStyle(isPrimary ? Color.white : Color.primary)
+                .background(
+                    Circle()
+                        .fill(isPrimary ? Color.accentColor : Color(.systemBackground))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            isPrimary ? Color.accentColor.opacity(0.2) : Color(.separator).opacity(0.18),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(
+                    color: isPrimary ? Color.accentColor.opacity(0.22) : Color.black.opacity(0.06),
+                    radius: isPrimary ? 12 : 6,
+                    y: isPrimary ? 6 : 2
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1)
+    }
+}
+
+struct GlobalAudioMiniPlayer: View {
+    private enum Layout {
+        static let contentSpacing: CGFloat = 8
+        static let horizontalPadding: CGFloat = 14
+        static let verticalPadding: CGFloat = 10
+        static let buttonSize: CGFloat = 34
+        static let cornerRadius: CGFloat = 18
+        static let progressHeight: CGFloat = 3
+    }
+
+    @EnvironmentObject private var playbackController: AudioPlaybackController
+
+    var body: some View {
+        if let currentMediaItem = playbackController.currentMediaItem {
+            Button {
+                playbackController.presentFullPlayer()
+            } label: {
+                VStack(alignment: .leading, spacing: Layout.contentSpacing) {
+                    HStack(spacing: 12) {
+                        Text(currentMediaItem.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button {
+                            playbackController.togglePlayback()
+                        } label: {
+                            Image(systemName: playbackController.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.subheadline.weight(.bold))
+                                .frame(width: Layout.buttonSize, height: Layout.buttonSize)
+                                .background(
+                                    Circle()
+                                        .fill(Color.accentColor.opacity(0.14))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
+                    }
+
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.primary.opacity(0.12))
+
+                            Capsule()
+                                .fill(Color.accentColor.opacity(0.9))
+                                .frame(width: max(proxy.size.width * playbackController.progressFraction, 6))
+                        }
+                    }
+                    .frame(height: Layout.progressHeight)
+                }
+                .padding(.horizontal, Layout.horizontalPadding)
+                .padding(.vertical, Layout.verticalPadding)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
+                        .stroke(Color(.separator).opacity(0.22), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.1), radius: 10, y: 4)
+            }
+            .buttonStyle(.plain)
+            .contentShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
+        }
     }
 }
 
@@ -1340,4 +1532,5 @@ struct PlayerView: View {
             )
         )
     }
+    .environmentObject(AudioPlaybackController.shared)
 }

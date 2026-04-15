@@ -3,7 +3,14 @@ import SwiftData
 import OSLog
 
 struct RootTabView: View {
+    private enum Layout {
+        static let horizontalPadding: CGFloat = 18
+        static let miniPlayerGapFromTabBar: CGFloat = 55
+        static let miniPlayerTopBreathingSpace: CGFloat = 3
+    }
+
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var audioPlaybackController: AudioPlaybackController
     @State private var hasRunLaunchReconciliation = false
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "RootTabView")
 
@@ -18,6 +25,29 @@ struct RootTabView: View {
                 .tabItem {
                     Label("Library", systemImage: "music.note.list")
                 }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if audioPlaybackController.currentMediaItem != nil {
+                VStack(spacing: 0) {
+                    GlobalAudioMiniPlayer()
+                        .padding(.horizontal, Layout.horizontalPadding)
+                    Color.clear
+                        .frame(height: Layout.miniPlayerGapFromTabBar)
+                }
+                .padding(.top, Layout.miniPlayerTopBreathingSpace)
+            } else {
+                Color.clear
+                    .frame(height: Layout.miniPlayerTopBreathingSpace)
+                    .allowsHitTesting(false)
+            }
+        }
+        .sheet(isPresented: $audioPlaybackController.isPlayerPresented, onDismiss: {
+            audioPlaybackController.dismissFullPlayer()
+        }) {
+            NavigationStack {
+                AudioPlayerView()
+            }
+            .presentationDetents([.medium, .large])
         }
         .task {
             await runLaunchReconciliationIfNeeded()
@@ -47,4 +77,5 @@ struct RootTabView: View {
 
 #Preview {
     RootTabView()
+        .environmentObject(AudioPlaybackController.shared)
 }
