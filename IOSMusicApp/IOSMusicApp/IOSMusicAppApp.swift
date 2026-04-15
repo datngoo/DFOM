@@ -15,7 +15,7 @@ struct IOSMusicAppApp: App {
         WindowGroup {
             RootTabView()
         }
-        .modelContainer(for: [MediaItem.self])
+        .modelContainer(for: [MediaItem.self, Playlist.self, PlaylistEntry.self])
     }
 }
 	

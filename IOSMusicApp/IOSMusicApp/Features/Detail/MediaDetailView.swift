@@ -222,5 +222,5 @@ private struct DetailRow: View {
             )
         )
     }
-    .modelContainer(for: [MediaItem.self], inMemory: true)
+    .modelContainer(for: [MediaItem.self, Playlist.self, PlaylistEntry.self], inMemory: true)
 }

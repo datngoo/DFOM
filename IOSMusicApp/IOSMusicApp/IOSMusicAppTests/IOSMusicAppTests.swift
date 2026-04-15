@@ -985,6 +985,47 @@ struct IOSMusicAppTests {
         #expect(savedItem.downloadedDate != nil)
         #expect(fileStorage.fileExists(at: storedURL))
     }
+
+    @Test
+    @MainActor
+    func libraryViewModelFiltersPlaylistsForSelectedMediaType() {
+        let viewModel = LibraryViewModel()
+        let audioPlaylist = Playlist(name: "Audio", mediaType: .audio)
+        let videoPlaylist = Playlist(name: "Video", mediaType: .video)
+        let emptyPlaylist = Playlist(name: "Empty")
+
+        viewModel.selectedFilter = .audio
+        let audioResults = viewModel.filteredPlaylists(from: [audioPlaylist, videoPlaylist, emptyPlaylist])
+        #expect(audioResults.map(\.name) == ["Audio", "Empty"])
+
+        viewModel.selectedFilter = .video
+        let videoResults = viewModel.filteredPlaylists(from: [audioPlaylist, videoPlaylist, emptyPlaylist])
+        #expect(videoResults.map(\.name) == ["Video", "Empty"])
+    }
+
+    @Test
+    @MainActor
+    func libraryViewModelOnlyReturnsCompatiblePlaylistsForMediaItem() {
+        let viewModel = LibraryViewModel()
+        let audioItem = MediaItem(
+            providerName: "youtube",
+            providerItemID: "audio-item",
+            title: "Audio Item",
+            mediaType: .audio,
+            downloadStatus: .downloaded,
+            localFilePath: "/tmp/audio-item.m4a"
+        )
+        let audioPlaylist = Playlist(name: "Audio", mediaType: .audio)
+        let videoPlaylist = Playlist(name: "Video", mediaType: .video)
+        let emptyPlaylist = Playlist(name: "Empty")
+
+        let compatiblePlaylists = viewModel.compatiblePlaylists(
+            for: audioItem,
+            from: [audioPlaylist, videoPlaylist, emptyPlaylist]
+        )
+
+        #expect(compatiblePlaylists.map(\.name) == ["Audio", "Empty"])
+    }
 }
 
 @MainActor
@@ -1107,7 +1148,12 @@ private struct TestSwiftDataRepositoryFactory: MediaLibraryRepository {
 @MainActor
 private func makeSwiftDataRepository() throws -> TestSwiftDataRepositoryFactory {
     let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try ModelContainer(for: MediaItem.self, configurations: configuration)
+    let container = try ModelContainer(
+        for: MediaItem.self,
+        Playlist.self,
+        PlaylistEntry.self,
+        configurations: configuration
+    )
     let repository = SwiftDataMediaLibraryRepository(modelContext: ModelContext(container))
     return TestSwiftDataRepositoryFactory(container: container, repository: repository)
 }
