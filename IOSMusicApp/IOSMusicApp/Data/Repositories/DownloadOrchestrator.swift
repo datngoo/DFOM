@@ -148,11 +148,12 @@ final class DownloadOrchestrator: DownloadOrchestrating {
             throw DownloadOrchestratorError.persistenceFailed
         }
 
+        let transferMediaType = effectiveTransferMediaType(for: item, requestedMediaType: mediaType)
         let descriptor: DownloadDescriptor
         do {
             logger.debug("6. About to prepare/resolve transfer descriptor for \(mediaType.rawValue, privacy: .public) \(item.providerItemId, privacy: .public)")
-            descriptor = try await transferDescriptor(for: item, mediaType: mediaType)
-            logger.debug("7. Descriptor ready for \(mediaType.rawValue, privacy: .public) \(item.providerItemId, privacy: .public) with extension \(descriptor.suggestedFileExtension ?? "nil", privacy: .public)")
+            descriptor = try await transferDescriptor(for: item, mediaType: transferMediaType)
+            logger.debug("7. Descriptor ready for \(mediaType.rawValue, privacy: .public) \(item.providerItemId, privacy: .public) using transfer type \(transferMediaType.rawValue, privacy: .public) with extension \(descriptor.suggestedFileExtension ?? "nil", privacy: .public)")
         } catch {
             markFailedIfPossible(
                 for: mediaItem,
@@ -164,7 +165,10 @@ final class DownloadOrchestrator: DownloadOrchestrating {
             throw error
         }
 
-        let resolvedFileFormat = descriptor.resolvedFileFormat
+        let downloadedTransferFileFormat = descriptor.resolvedFileFormat
+        let finalStorageFileFormat = mediaType == .audio && transferMediaType == .video
+            ? ManagedMediaFileFormat.defaultFormat(for: .audio)
+            : descriptor.resolvedFileFormat
         do {
             try repository.updateDownloadState(
                 for: mediaItem,
@@ -189,8 +193,8 @@ final class DownloadOrchestrator: DownloadOrchestrating {
         do {
             temporaryFileURL = try await downloader.download(
                 from: descriptor.remoteURL,
-                mediaType: mediaType,
-                suggestedFileExtension: resolvedFileFormat.fileExtension
+                mediaType: transferMediaType,
+                suggestedFileExtension: descriptor.resolvedFileFormat.fileExtension
             ) { [weak self] progress in
                 Task { @MainActor in
                     guard let self else {
@@ -233,17 +237,17 @@ final class DownloadOrchestrator: DownloadOrchestrating {
         }
 
         let storedMediaKind = try storedMediaKind(for: mediaType)
-        let storedFileURL: URL
+        let initiallyStoredFileURL: URL
         do {
             logger.debug("10. About to move file into Application Support for \(mediaType.rawValue, privacy: .public) \(item.providerItemId, privacy: .public)")
-            storedFileURL = try fileStorage.moveTemporaryDownloadedFile(
+            initiallyStoredFileURL = try fileStorage.moveTemporaryDownloadedFile(
                 at: temporaryFileURL,
                 for: mediaItem.id,
                 kind: storedMediaKind,
-                fileExtension: resolvedFileFormat.fileExtension
+                fileExtension: downloadedTransferFileFormat.fileExtension
             )
-            try fileStorage.ensureManagedFileExists(at: storedFileURL)
-            logger.debug("11. Moved file successfully to \(storedFileURL.path, privacy: .public)")
+            try fileStorage.ensureManagedFileExists(at: initiallyStoredFileURL)
+            logger.debug("11. Moved file successfully to \(initiallyStoredFileURL.path, privacy: .public)")
         } catch {
             cleanupTemporaryFileIfNeeded(at: temporaryFileURL)
             markFailedIfPossible(
@@ -254,6 +258,28 @@ final class DownloadOrchestrator: DownloadOrchestrating {
                 underlyingError: error
             )
             throw DownloadOrchestratorError.fileStorageFailed
+        }
+
+        let storedFileURL: URL
+        do {
+            storedFileURL = try await finalizeStoredFileIfNeeded(
+                initiallyStoredFileURL,
+                requestedMediaType: mediaType,
+                transferMediaType: transferMediaType,
+                mediaItemID: mediaItem.id,
+                providerItemID: item.providerItemId,
+                finalFileFormat: finalStorageFileFormat
+            )
+        } catch {
+            cleanupStoredFilesIfNeeded(for: mediaItem)
+            markFailedIfPossible(
+                for: mediaItem,
+                mediaType: mediaType,
+                providerItemID: item.providerItemId,
+                stage: "download post-processing",
+                underlyingError: error
+            )
+            throw DownloadOrchestratorError.downloadFailed
         }
 
         do {
@@ -309,6 +335,14 @@ final class DownloadOrchestrator: DownloadOrchestrating {
         "\(provider)|\(providerItemID)|\(mediaType.rawValue)"
     }
 
+    private func effectiveTransferMediaType(for item: ResolvedMediaItem, requestedMediaType: MediaType) -> MediaType {
+        if requestedMediaType == .audio, item.provider == YouTubeURLResolutionProvider.providerName {
+            return .video
+        }
+
+        return requestedMediaType
+    }
+
     private func transferDescriptor(for item: ResolvedMediaItem, mediaType: MediaType) async throws -> DownloadDescriptor {
         do {
             return try await downloadProvider.resolveDownload(for: item, mediaType: mediaType)
@@ -316,6 +350,67 @@ final class DownloadOrchestrator: DownloadOrchestrating {
             logger.error("6. Descriptor resolution failed: \(String(describing: error), privacy: .public)")
             throw error
         }
+    }
+
+    private func finalizeStoredFileIfNeeded(
+        _ storedTransferFileURL: URL,
+        requestedMediaType: MediaType,
+        transferMediaType: MediaType,
+        mediaItemID: UUID,
+        providerItemID: String,
+        finalFileFormat: ManagedMediaFileFormat
+    ) async throws -> URL {
+        guard requestedMediaType == .audio, transferMediaType == .video else {
+            return storedTransferFileURL
+        }
+
+        logger.debug("11a. Exporting audio track from stored video for \(providerItemID, privacy: .public)")
+        let exportedAudioURL = try await exportAudioTrack(fromVideoAt: storedTransferFileURL)
+
+        let finalStoredAudioURL = try fileStorage.moveTemporaryDownloadedFile(
+            at: exportedAudioURL,
+            for: mediaItemID,
+            kind: .audio,
+            fileExtension: finalFileFormat.fileExtension
+        )
+        try fileStorage.ensureManagedFileExists(at: finalStoredAudioURL)
+
+        cleanupTemporaryFileIfNeeded(at: storedTransferFileURL)
+        logger.debug("11b. Exported audio track successfully for \(providerItemID, privacy: .public) to \(finalStoredAudioURL.path, privacy: .public)")
+        return finalStoredAudioURL
+    }
+
+    private func exportAudioTrack(fromVideoAt videoURL: URL) async throws -> URL {
+        let asset = AVURLAsset(url: videoURL)
+        let audioTracks = try await asset.loadTracks(withMediaCharacteristic: .audible)
+
+        guard !audioTracks.isEmpty else {
+            throw MediaFileDownloaderError.unplayableDownloadedMedia
+        }
+
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw MediaFileDownloaderError.unplayableDownloadedMedia
+        }
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: false)
+            .appendingPathExtension(ManagedMediaFileFormat.m4a.fileExtension)
+
+        exportSession.outputURL = outputURL
+        exportSession.outputFileType = .m4a
+        exportSession.shouldOptimizeForNetworkUse = false
+
+        try await exportSession.exportCompat()
+
+        guard exportSession.status == .completed,
+              FileManager.default.fileExists(atPath: outputURL.path) else {
+            if FileManager.default.fileExists(atPath: outputURL.path) {
+                cleanupTemporaryFileIfNeeded(at: outputURL)
+            }
+            throw exportSession.error ?? MediaFileDownloaderError.unplayableDownloadedMedia
+        }
+
+        return outputURL
     }
 
     private func validatePlayableMediaIfNeeded(at fileURL: URL, mediaType: MediaType) async throws {
@@ -437,6 +532,25 @@ final class DownloadOrchestrator: DownloadOrchestrating {
             logger.error(
                 "13. Failed during \(stage, privacy: .public) for \(mediaType.rawValue, privacy: .public) \(providerItemID, privacy: .public): \(String(describing: underlyingError), privacy: .public). Also failed to persist failed state: \(String(describing: error), privacy: .public)"
             )
+        }
+    }
+}
+
+private extension AVAssetExportSession {
+    func exportCompat() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            exportAsynchronously {
+                switch self.status {
+                case .completed:
+                    continuation.resume()
+                case .failed:
+                    continuation.resume(throwing: self.error ?? MediaFileDownloaderError.unplayableDownloadedMedia)
+                case .cancelled:
+                    continuation.resume(throwing: MediaFileDownloaderError.transportFailed)
+                default:
+                    continuation.resume(throwing: self.error ?? MediaFileDownloaderError.unplayableDownloadedMedia)
+                }
+            }
         }
     }
 }
