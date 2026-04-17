@@ -95,36 +95,44 @@ struct LibraryView: View {
     }
 
     private var mediaItemsSection: some View {
-        Section(viewModel.sectionTitle) {
-            if displayedMediaItems.isEmpty {
-                Text(viewModel.emptyStateDescription)
-                    .foregroundStyle(.secondary)
-            } else {
-                if viewModel.selectedTab == .songs {
+        Group {
+            if viewModel.selectedTab == .songs {
+                if displayedMediaItems.isEmpty {
+                    Text(viewModel.emptyStateDescription)
+                        .foregroundStyle(.secondary)
+                } else {
+                    songsActionSection
                     ForEach(displayedMediaItems) { item in
                         songRow(for: item)
                     }
-                } else {
-                    ForEach(displayedMediaItems) { item in
-                        NavigationLink {
-                            if isPlayableAudioItem(item) {
-                                LibraryMediaDetailView(
+                }
+            } else {
+                Section(viewModel.sectionTitle) {
+                    if displayedMediaItems.isEmpty {
+                        Text(viewModel.emptyStateDescription)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(displayedMediaItems) { item in
+                            NavigationLink {
+                                if isPlayableAudioItem(item) {
+                                    LibraryMediaDetailView(
+                                        item: item,
+                                        audioPlaylist: playableAudioItems,
+                                        fileStorage: fileStorage
+                                    )
+                                } else {
+                                    LibraryMediaDetailView(item: item, fileStorage: fileStorage)
+                                }
+                            } label: {
+                                MediaItemRow(
                                     item: item,
-                                    audioPlaylist: playableAudioItems,
-                                    fileStorage: fileStorage
+                                    fileStorage: fileStorage,
+                                    style: .library
                                 )
-                            } else {
-                                LibraryMediaDetailView(item: item, fileStorage: fileStorage)
                             }
-                        } label: {
-                            MediaItemRow(
-                                item: item,
-                                fileStorage: fileStorage,
-                                style: .library
-                            )
                         }
+                        .onDelete(perform: deleteItems)
                     }
-                    .onDelete(perform: deleteItems)
                 }
             }
         }
@@ -176,6 +184,45 @@ struct LibraryView: View {
         .padding(.top, 8)
         .padding(.bottom, 12)
         .background(Color(.systemBackground))
+    }
+
+    private var songsActionSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Button {
+                    playAllSongs()
+                } label: {
+                    VStack(spacing: 4) {
+                        Text("Play All")
+                        Text("(\(playableAudioItems.count))")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .disabled(playableAudioItems.isEmpty)
+
+                Button {
+                    playRandomSongs()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shuffle")
+                        Text("Play Random")
+                            .multilineTextAlignment(.center)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .disabled(playableAudioItems.isEmpty)
+            }
+            .textCase(nil)
+        }
     }
 
     private func songRow(for item: MediaItem) -> some View {
@@ -348,6 +395,31 @@ struct LibraryView: View {
         audioPlaybackController.enqueueNext(
             item: item,
             from: playableAudioItems,
+            fileStorage: fileStorage
+        )
+    }
+
+    private func playAllSongs() {
+        guard !playableAudioItems.isEmpty else {
+            return
+        }
+
+        audioPlaybackController.startQueue(
+            items: playableAudioItems,
+            startAt: 0,
+            fileStorage: fileStorage
+        )
+    }
+
+    private func playRandomSongs() {
+        let shuffledItems = playableAudioItems.shuffled()
+        guard !shuffledItems.isEmpty else {
+            return
+        }
+
+        audioPlaybackController.startQueue(
+            items: shuffledItems,
+            startAt: 0,
             fileStorage: fileStorage
         )
     }

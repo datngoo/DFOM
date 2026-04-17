@@ -361,6 +361,8 @@ final class AudioPlaybackController: ObservableObject {
     @Published var isPlaying = false
     @Published private(set) var playbackMode: PlaybackMode
     @Published private(set) var currentMediaItem: MediaItem?
+    @Published private(set) var queueItems: [MediaItem] = []
+    @Published private(set) var currentQueueIndex = 0
     @Published var isPlayerPresented = false
 
     private static let playbackModeDefaultsKey = "AudioPlaybackController.playbackMode"
@@ -412,7 +414,7 @@ final class AudioPlaybackController: ObservableObject {
         self.playlist = normalizedPlaylist
         self.currentPlaylistIndex = targetIndex
         ensureRemoteCommandsAttached()
-        syncRemoteTrackNavigationAvailability()
+        updatePublishedQueueState()
 
         if currentMediaItem?.id == targetItem.id, player != nil {
             currentMediaItem = targetItem
@@ -539,7 +541,76 @@ final class AudioPlaybackController: ObservableObject {
         self.playlist.removeAll { $0.id == targetItem.id }
         let insertionIndex = min(currentPlaylistIndex + 1, self.playlist.count)
         self.playlist.insert(targetItem, at: insertionIndex)
-        syncRemoteTrackNavigationAvailability()
+        updatePublishedQueueState()
+    }
+
+    func startQueue(
+        items: [MediaItem],
+        startAt index: Int = 0,
+        fileStorage: LocalFileStorage? = nil
+    ) {
+        guard !items.isEmpty else {
+            return
+        }
+
+        let clampedIndex = min(max(index, 0), items.count - 1)
+        configure(item: items[clampedIndex], playlist: items, fileStorage: fileStorage)
+        play()
+    }
+
+    func moveQueueItem(id: UUID, direction: QueueMoveDirection) {
+        guard let sourceIndex = playlist.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+
+        let destinationIndex = sourceIndex + direction.offset
+        guard playlist.indices.contains(destinationIndex),
+              sourceIndex != currentPlaylistIndex,
+              destinationIndex != currentPlaylistIndex else {
+            return
+        }
+
+        let item = playlist.remove(at: sourceIndex)
+        playlist.insert(item, at: destinationIndex)
+
+        if sourceIndex < currentPlaylistIndex {
+            currentPlaylistIndex -= 1
+        }
+
+        if destinationIndex <= currentPlaylistIndex {
+            currentPlaylistIndex += 1
+        }
+
+        updatePublishedQueueState()
+    }
+
+    func removeQueueItem(id: UUID) {
+        guard let sourceIndex = playlist.firstIndex(where: { $0.id == id }),
+              sourceIndex != currentPlaylistIndex else {
+            return
+        }
+
+        playlist.remove(at: sourceIndex)
+
+        if sourceIndex < currentPlaylistIndex {
+            currentPlaylistIndex -= 1
+        }
+
+        updatePublishedQueueState()
+    }
+
+    func reorderQueue(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        var nextPlaylist = playlist
+        nextPlaylist.move(fromOffsets: offsets, toOffset: destination)
+
+        guard let currentMediaItemID = currentMediaItem?.id,
+              let nextCurrentIndex = nextPlaylist.firstIndex(where: { $0.id == currentMediaItemID }) else {
+            return
+        }
+
+        playlist = nextPlaylist
+        currentPlaylistIndex = nextCurrentIndex
+        updatePublishedQueueState()
     }
 
     var canControlPlayback: Bool {
@@ -842,7 +913,7 @@ final class AudioPlaybackController: ObservableObject {
 
         currentPlaylistIndex = targetIndex
         currentMediaItem = playlist[targetIndex]
-        syncRemoteTrackNavigationAvailability()
+        updatePublishedQueueState()
         prepareCurrentTrack(autoplay: true)
     }
 
@@ -859,7 +930,7 @@ final class AudioPlaybackController: ObservableObject {
         let nextIndex = (currentPlaylistIndex + 1) % playlist.count
         currentPlaylistIndex = nextIndex
         currentMediaItem = playlist[nextIndex]
-        syncRemoteTrackNavigationAvailability()
+        updatePublishedQueueState()
         prepareCurrentTrack(autoplay: true)
     }
 
@@ -881,7 +952,7 @@ final class AudioPlaybackController: ObservableObject {
 
         currentPlaylistIndex = nextIndex
         currentMediaItem = playlist[nextIndex]
-        syncRemoteTrackNavigationAvailability()
+        updatePublishedQueueState()
         prepareCurrentTrack(autoplay: true)
     }
 
@@ -917,6 +988,12 @@ final class AudioPlaybackController: ObservableObject {
         )
     }
 
+    private func updatePublishedQueueState() {
+        queueItems = playlist
+        currentQueueIndex = currentPlaylistIndex
+        syncRemoteTrackNavigationAvailability()
+    }
+
     private func syncRemoteTrackNavigationAvailability() {
         backgroundAudioCoordinator.updateTrackNavigationHandlers(
             owner: self,
@@ -950,8 +1027,23 @@ final class AudioPlaybackController: ObservableObject {
     }
 }
 
+enum QueueMoveDirection {
+    case up
+    case down
+
+    var offset: Int {
+        switch self {
+        case .up:
+            return -1
+        case .down:
+            return 1
+        }
+    }
+}
+
 struct AudioPlayerView: View {
     @EnvironmentObject private var playbackController: AudioPlaybackController
+    @State private var isQueuePresented = false
 
     private let item: MediaItem?
     private let playlist: [MediaItem]
@@ -969,10 +1061,6 @@ struct AudioPlayerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(playbackController.title)
-                .font(.title2)
-                .fontWeight(.semibold)
-
             Text(playbackController.errorMessage ?? playbackController.playbackStateText)
                 .font(.body)
                 .foregroundStyle(playbackController.errorMessage == nil ? Color.secondary : Color.red)
@@ -1004,6 +1092,24 @@ struct AudioPlayerView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!playbackController.canControlPlayback)
+
+            if !playbackController.queueItems.isEmpty {
+                Button {
+                    isQueuePresented = true
+                } label: {
+                    HStack {
+                        Label("Queue", systemImage: "list.bullet")
+                        Spacer()
+                        Text("\(playbackController.queueItems.count)")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
 
             VStack(spacing: 18) {
                 Text("Playback Controls")
@@ -1055,13 +1161,23 @@ struct AudioPlayerView: View {
             Spacer()
         }
         .padding()
-        .navigationTitle("Audio Player")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if let item {
                 playbackController.configure(item: item, playlist: playlist, fileStorage: fileStorage)
             }
         }
+        .sheet(isPresented: $isQueuePresented) {
+            NavigationStack {
+                QueueManagementView()
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    private func queueArtistLabel(for item: MediaItem) -> String {
+        let creatorName = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return creatorName.isEmpty ? "Unknown artist" : creatorName
     }
 
     private func playerControlButton(
@@ -1096,6 +1212,80 @@ struct AudioPlayerView: View {
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
+    }
+}
+
+private struct QueueManagementView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var playbackController: AudioPlaybackController
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(Array(playbackController.queueItems.enumerated()), id: \.element.id) { index, item in
+                    QueueListRow(
+                        item: item,
+                        artistLabel: queueArtistLabel(for: item),
+                        isCurrent: index == playbackController.currentQueueIndex,
+                        onRemove: { playbackController.removeQueueItem(id: item.id) }
+                    )
+                    .moveDisabled(index == playbackController.currentQueueIndex)
+                }
+                .onMove(perform: playbackController.reorderQueue)
+            } footer: {
+                Text("Long press and drag a song to change its order. Removing a song only removes it from the queue.")
+            }
+        }
+        .environment(\.editMode, .constant(.active))
+        .navigationTitle("Queue")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    dismiss()
+                }
+            }
+        }
+    }
+
+    private func queueArtistLabel(for item: MediaItem) -> String {
+        let creatorName = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return creatorName.isEmpty ? "Unknown artist" : creatorName
+    }
+}
+
+private struct QueueListRow: View {
+    let item: MediaItem
+    let artistLabel: String
+    let isCurrent: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.subheadline.weight(isCurrent ? .semibold : .regular))
+                    .lineLimit(1)
+
+                Text(artistLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if isCurrent {
+                Text("Now")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            } else {
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 }
 
