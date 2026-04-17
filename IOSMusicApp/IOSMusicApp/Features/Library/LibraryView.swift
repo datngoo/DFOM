@@ -21,6 +21,7 @@ struct LibraryView: View {
     @StateObject private var viewModel: LibraryViewModel
     @State private var isCreatePlaylistPresented = false
     @State private var itemPendingPlaylistSelection: MediaItem?
+    @State private var itemPendingDeletion: MediaItem?
     private let fileStorage: LocalFileStorage
     private let logger = Logger(subsystem: "IOSMusicApp", category: "LibraryView")
 
@@ -67,6 +68,29 @@ struct LibraryView: View {
                     playlists: compatibleAudioPlaylists(for: item)
                 )
             }
+            .alert(
+                "Delete Song?",
+                isPresented: Binding(
+                    get: { itemPendingDeletion != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            itemPendingDeletion = nil
+                        }
+                    }
+                ),
+                presenting: itemPendingDeletion
+            ) { item in
+                Button("Delete", role: .destructive) {
+                    delete(item: item)
+                    itemPendingDeletion = nil
+                }
+
+                Button("Cancel", role: .cancel) {
+                    itemPendingDeletion = nil
+                }
+            } message: { item in
+                Text("\"\(item.title)\" will be removed from your library and playlists.")
+            }
         }
     }
 
@@ -76,20 +100,12 @@ struct LibraryView: View {
                 Text(viewModel.emptyStateDescription)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(displayedMediaItems) { item in
-                    if viewModel.selectedTab == .songs {
-                        Button {
-                            playSong(item)
-                        } label: {
-                            MediaItemRow(
-                                item: item,
-                                fileStorage: fileStorage,
-                                style: .song
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!isPlayableAudioItem(item))
-                    } else {
+                if viewModel.selectedTab == .songs {
+                    ForEach(displayedMediaItems) { item in
+                        songRow(for: item)
+                    }
+                } else {
+                    ForEach(displayedMediaItems) { item in
                         NavigationLink {
                             if isPlayableAudioItem(item) {
                                 LibraryMediaDetailView(
@@ -108,8 +124,8 @@ struct LibraryView: View {
                             )
                         }
                     }
+                    .onDelete(perform: deleteItems)
                 }
-                .onDelete(perform: deleteItems)
             }
         }
     }
@@ -162,11 +178,66 @@ struct LibraryView: View {
         .background(Color(.systemBackground))
     }
 
+    private func songRow(for item: MediaItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                playSong(item)
+            } label: {
+                MediaItemRow(
+                    item: item,
+                    fileStorage: fileStorage,
+                    style: .song
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!isPlayableAudioItem(item))
+
+            Menu {
+                Button {
+                    itemPendingPlaylistSelection = item
+                } label: {
+                    Label("Add to Playlist", systemImage: "text.badge.plus")
+                }
+
+                Button {
+                    queueSongNext(item)
+                } label: {
+                    Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                }
+                .disabled(!isPlayableAudioItem(item))
+
+                Button(role: .destructive) {
+                    itemPendingDeletion = item
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .disabled(item.mediaType != .audio)
+        }
+    }
+
     private func deleteItems(at offsets: IndexSet) {
+        let itemsToDelete = offsets.compactMap { index in
+            displayedMediaItems.indices.contains(index) ? displayedMediaItems[index] : nil
+        }
+
+        delete(items: itemsToDelete)
+    }
+
+    private func delete(item: MediaItem) {
+        delete(items: [item])
+    }
+
+    private func delete(items: [MediaItem]) {
         var playlistsToReset: [UUID: Playlist] = [:]
 
-        for offset in offsets {
-            let item = displayedMediaItems[offset]
+        for item in items {
             let entries = item.playlistEntries
 
             for entry in entries {
@@ -268,6 +339,18 @@ struct LibraryView: View {
         )
         audioPlaybackController.play()
     }
+
+    private func queueSongNext(_ item: MediaItem) {
+        guard isPlayableAudioItem(item) else {
+            return
+        }
+
+        audioPlaybackController.enqueueNext(
+            item: item,
+            from: playableAudioItems,
+            fileStorage: fileStorage
+        )
+    }
 }
 
 private struct MediaItemRow: View {
@@ -310,12 +393,6 @@ private struct MediaItemRow: View {
                 }
             }
 
-            if style == .song {
-                Image(systemName: "ellipsis")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 2)
-            }
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

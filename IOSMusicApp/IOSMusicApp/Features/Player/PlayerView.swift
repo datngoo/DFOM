@@ -515,6 +515,33 @@ final class AudioPlaybackController: ObservableObject {
         navigateToAdjacentTrack(offset: 1)
     }
 
+    func enqueueNext(
+        item: MediaItem,
+        from playlist: [MediaItem] = [],
+        fileStorage: LocalFileStorage? = nil
+    ) {
+        if let fileStorage {
+            self.fileStorage = fileStorage
+        }
+
+        let candidatePlaylist = Self.normalizedPlaylist(for: item, from: playlist)
+        let targetItem = candidatePlaylist.first(where: { $0.id == item.id }) ?? item
+
+        guard targetItem.mediaType == .audio else {
+            return
+        }
+
+        if self.playlist.isEmpty || currentMediaItem == nil {
+            configure(item: targetItem, playlist: candidatePlaylist, fileStorage: fileStorage)
+            return
+        }
+
+        self.playlist.removeAll { $0.id == targetItem.id }
+        let insertionIndex = min(currentPlaylistIndex + 1, self.playlist.count)
+        self.playlist.insert(targetItem, at: insertionIndex)
+        syncRemoteTrackNavigationAvailability()
+    }
+
     var canControlPlayback: Bool {
         currentMediaItem != nil && errorMessage == nil && player != nil && duration >= 0
     }
