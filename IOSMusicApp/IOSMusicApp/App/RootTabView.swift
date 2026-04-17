@@ -58,7 +58,7 @@ struct RootTabView: View {
             NavigationStack {
                 AudioPlayerView()
             }
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
         }
         .task {
             await runLaunchReconciliationIfNeeded()

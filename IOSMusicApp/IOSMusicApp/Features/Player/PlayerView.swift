@@ -1060,107 +1060,117 @@ struct AudioPlayerView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(playbackController.errorMessage ?? playbackController.playbackStateText)
-                .font(.body)
-                .foregroundStyle(playbackController.errorMessage == nil ? Color.secondary : Color.red)
-
-            VStack(spacing: 12) {
-                Slider(
-                    value: Binding(
-                        get: { min(playbackController.currentTime, playbackController.displayedDuration) },
-                        set: { playbackController.seek(to: $0) }
-                    ),
-                    in: 0...playbackController.displayedDuration
-                )
-                .disabled(!playbackController.canControlPlayback || playbackController.displayedDuration <= 0)
-
-                HStack {
-                    Text(playbackController.formattedTime(playbackController.currentTime))
-                    Spacer()
-                    Text(playbackController.formattedTime(playbackController.duration))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                if let currentMediaItem = playbackController.currentMediaItem {
+                    Text(currentMediaItem.title)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(2)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
 
-            Button {
-                playbackController.cyclePlaybackMode()
-            } label: {
-                Label(playbackController.playbackMode.title, systemImage: playbackController.playbackMode.symbolName)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!playbackController.canControlPlayback)
+                Text(playbackController.errorMessage ?? playbackController.playbackStateText)
+                    .font(.body)
+                    .foregroundStyle(playbackController.errorMessage == nil ? Color.secondary : Color.red)
 
-            if !playbackController.queueItems.isEmpty {
-                Button {
-                    isQueuePresented = true
-                } label: {
+                VStack(spacing: 12) {
+                    Slider(
+                        value: Binding(
+                            get: { min(playbackController.currentTime, playbackController.displayedDuration) },
+                            set: { playbackController.seek(to: $0) }
+                        ),
+                        in: 0...playbackController.displayedDuration
+                    )
+                    .disabled(!playbackController.canControlPlayback || playbackController.displayedDuration <= 0)
+
                     HStack {
-                        Label("Queue", systemImage: "list.bullet")
+                        Text(playbackController.formattedTime(playbackController.currentTime))
                         Spacer()
-                        Text("\(playbackController.queueItems.count)")
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                        Text(playbackController.formattedTime(playbackController.duration))
                     }
-                    .frame(maxWidth: .infinity)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    playbackController.cyclePlaybackMode()
+                } label: {
+                    Label(playbackController.playbackMode.title, systemImage: playbackController.playbackMode.symbolName)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-            }
+                .disabled(!playbackController.canControlPlayback)
 
-            VStack(spacing: 18) {
-                Text("Playback Controls")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                HStack(spacing: 20) {
-                    playerControlButton(
-                        systemName: "backward.fill",
-                        size: 52,
-                        isPrimary: false,
-                        isDisabled: !playbackController.canPlayPreviousTrack
-                    ) {
-                        playbackController.playPreviousTrack()
+                if !playbackController.queueItems.isEmpty {
+                    Button {
+                        isQueuePresented = true
+                    } label: {
+                        HStack {
+                            Label("Queue", systemImage: "list.bullet")
+                            Spacer()
+                            Text("\(playbackController.queueItems.count)")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.bordered)
+                }
 
-                    playerControlButton(
-                        systemName: playbackController.isPlaying ? "pause.fill" : "play.fill",
-                        size: 62,
-                        isPrimary: true,
-                        isDisabled: !playbackController.canControlPlayback
-                    ) {
-                        playbackController.togglePlayback()
-                    }
+                VStack(spacing: 18) {
+                    Text("Playback Controls")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
 
-                    playerControlButton(
-                        systemName: "forward.fill",
-                        size: 52,
-                        isPrimary: false,
-                        isDisabled: !playbackController.canPlayNextTrack
-                    ) {
-                        playbackController.playNextTrack()
+                    HStack(spacing: 20) {
+                        playerControlButton(
+                            systemName: "backward.fill",
+                            size: 52,
+                            isPrimary: false,
+                            isDisabled: !playbackController.canPlayPreviousTrack
+                        ) {
+                            playbackController.playPreviousTrack()
+                        }
+
+                        playerControlButton(
+                            systemName: playbackController.isPlaying ? "pause.fill" : "play.fill",
+                            size: 62,
+                            isPrimary: true,
+                            isDisabled: !playbackController.canControlPlayback
+                        ) {
+                            playbackController.togglePlayback()
+                        }
+
+                        playerControlButton(
+                            systemName: "forward.fill",
+                            size: 52,
+                            isPrimary: false,
+                            isDisabled: !playbackController.canPlayNextTrack
+                        ) {
+                            playbackController.playNextTrack()
+                        }
                     }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 20)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
-            )
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
+                )
 
-            Spacer()
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal)
+            .padding(.top, 24)
+            .padding(.bottom, 16)
         }
-        .padding()
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if let item {
