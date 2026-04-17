@@ -9,9 +9,7 @@ struct RootTabView: View {
     }
 
     private enum Layout {
-        static let horizontalPadding: CGFloat = 16
-        static let miniPlayerGapFromTabBar: CGFloat = 55
-        static let miniPlayerTopBreathingSpace: CGFloat = 3
+        static let floatingMiniPlayerHorizontalMargin: CGFloat = 16
     }
 
     @Environment(\.modelContext) private var modelContext
@@ -25,40 +23,32 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            URLInputView()
-                .tag(AppTab.service)
-                .tabItem {
-                    Label("Service", systemImage: "square.stack.3d.up")
-                }
-
-            LibraryView()
-                .tag(AppTab.library)
-                .tabItem {
-                    Label("Library", systemImage: "music.note.list")
-                }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            ZStack {
-                if isMiniPlayerVisible {
-                    VStack(spacing: 0) {
-                        GlobalAudioMiniPlayer()
-                            .padding(.horizontal, Layout.horizontalPadding)
-                            .transition(
-                                .move(edge: .bottom)
-                                .combined(with: .opacity)
-                            )
-                        Color.clear
-                            .frame(height: Layout.miniPlayerGapFromTabBar)
+        GeometryReader { proxy in
+            TabView(selection: $selectedTab) {
+                URLInputView()
+                    .tag(AppTab.service)
+                    .tabItem {
+                        Label("Service", systemImage: "square.stack.3d.up")
                     }
-                    .padding(.top, Layout.miniPlayerTopBreathingSpace)
-                } else {
-                    Color.clear
-                        .frame(height: Layout.miniPlayerTopBreathingSpace)
-                        .allowsHitTesting(false)
+
+                LibraryView()
+                    .tag(AppTab.library)
+                    .tabItem {
+                        Label("Library", systemImage: "music.note.list")
+                    }
+            }
+            .overlay(alignment: .topLeading) {
+                if isMiniPlayerVisible {
+                    FloatingMiniPlayerOverlay(
+                        containerSize: proxy.size,
+                        safeAreaInsets: proxy.safeAreaInsets
+                    )
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+                    .padding(.horizontal, Layout.floatingMiniPlayerHorizontalMargin)
+                    .padding(.top, 4)
+                    .animation(.spring(response: 0.34, dampingFraction: 0.88), value: isMiniPlayerVisible)
                 }
             }
-            .animation(.spring(response: 0.34, dampingFraction: 0.88), value: isMiniPlayerVisible)
         }
         .sheet(isPresented: $audioPlaybackController.isPlayerPresented, onDismiss: {
             audioPlaybackController.dismissFullPlayer()
@@ -91,6 +81,98 @@ struct RootTabView: View {
         } catch {
             logger.error("Launch reconciliation failed: \(String(describing: error), privacy: .public)")
         }
+    }
+}
+
+private struct FloatingMiniPlayerOverlay: View {
+    private enum Layout {
+        static let minWidth: CGFloat = 200
+        static let maxWidth: CGFloat = 270
+        static let height: CGFloat = 72
+        static let horizontalPadding: CGFloat = 16
+        static let topPadding: CGFloat = 18
+        static let bottomClearance: CGFloat = 94
+    }
+
+    let containerSize: CGSize
+    let safeAreaInsets: EdgeInsets
+
+    @GestureState private var dragTranslation: CGSize = .zero
+    @State private var restingPosition: CGPoint?
+
+    var body: some View {
+        let miniPlayerSize = CGSize(width: miniPlayerWidth, height: Layout.height)
+
+        GlobalAudioMiniPlayer()
+            .frame(width: miniPlayerWidth)
+            .position(currentPosition(for: miniPlayerSize))
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 8)
+                    .updating($dragTranslation) { value, state, _ in
+                        state = value.translation
+                    }
+                    .onEnded { value in
+                        let start = restingPosition ?? defaultPosition(for: miniPlayerSize)
+                        let target = CGPoint(
+                            x: start.x + value.translation.width,
+                            y: start.y + value.translation.height
+                        )
+                        restingPosition = snappedPosition(for: clamp(target, size: miniPlayerSize), size: miniPlayerSize)
+                    }
+            )
+            .onAppear {
+                if restingPosition == nil {
+                    restingPosition = defaultPosition(for: miniPlayerSize)
+                }
+            }
+            .onChange(of: containerSize) { _, _ in
+                guard let restingPosition else {
+                    return
+                }
+
+                self.restingPosition = clamp(restingPosition, size: miniPlayerSize)
+            }
+    }
+
+    private var miniPlayerWidth: CGFloat {
+        min(max(containerSize.width * 0.52, Layout.minWidth), Layout.maxWidth)
+    }
+
+    private func currentPosition(for size: CGSize) -> CGPoint {
+        let base = restingPosition ?? defaultPosition(for: size)
+        let translated = CGPoint(
+            x: base.x + dragTranslation.width,
+            y: base.y + dragTranslation.height
+        )
+
+        return clamp(translated, size: size)
+    }
+
+    private func defaultPosition(for size: CGSize) -> CGPoint {
+        CGPoint(
+            x: containerSize.width - (size.width / 2) - Layout.horizontalPadding,
+            y: containerSize.height - safeAreaInsets.bottom - Layout.bottomClearance - (size.height / 2)
+        )
+    }
+
+    private func clamp(_ point: CGPoint, size: CGSize) -> CGPoint {
+        let minX = size.width / 2 + Layout.horizontalPadding
+        let maxX = containerSize.width - size.width / 2 - Layout.horizontalPadding
+        let minY = safeAreaInsets.top + size.height / 2 + Layout.topPadding
+        let maxY = containerSize.height - safeAreaInsets.bottom - Layout.bottomClearance - (size.height / 2)
+
+        return CGPoint(
+            x: min(max(point.x, minX), maxX),
+            y: min(max(point.y, minY), maxY)
+        )
+    }
+
+    private func snappedPosition(for point: CGPoint, size: CGSize) -> CGPoint {
+        let minX = size.width / 2 + Layout.horizontalPadding
+        let maxX = containerSize.width - size.width / 2 - Layout.horizontalPadding
+        let targetX = point.x < containerSize.width / 2 ? minX : maxX
+
+        return CGPoint(x: targetX, y: point.y)
     }
 }
 
