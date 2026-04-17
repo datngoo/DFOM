@@ -3,6 +3,11 @@ import SwiftData
 import OSLog
 
 struct RootTabView: View {
+    private enum AppTab: Hashable {
+        case service
+        case library
+    }
+
     private enum Layout {
         static let horizontalPadding: CGFloat = 16
         static let miniPlayerGapFromTabBar: CGFloat = 55
@@ -12,20 +17,23 @@ struct RootTabView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var audioPlaybackController: AudioPlaybackController
     @State private var hasRunLaunchReconciliation = false
+    @State private var selectedTab: AppTab = .service
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "RootTabView")
 
     private var isMiniPlayerVisible: Bool {
-        audioPlaybackController.currentMediaItem != nil
+        selectedTab == .library && audioPlaybackController.currentMediaItem != nil
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             URLInputView()
+                .tag(AppTab.service)
                 .tabItem {
-                    Label("Input", systemImage: "link")
+                    Label("Service", systemImage: "square.stack.3d.up")
                 }
 
             LibraryView()
+                .tag(AppTab.library)
                 .tabItem {
                     Label("Library", systemImage: "music.note.list")
                 }

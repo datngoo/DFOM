@@ -22,6 +22,7 @@ struct LibraryView: View {
     @State private var isCreatePlaylistPresented = false
     @State private var itemPendingPlaylistSelection: MediaItem?
     @State private var itemPendingDeletion: MediaItem?
+    @State private var songSearchText = ""
     private let fileStorage: LocalFileStorage
     private let logger = Logger(subsystem: "IOSMusicApp", category: "LibraryView")
 
@@ -42,7 +43,13 @@ struct LibraryView: View {
             }
             .listStyle(.insetGrouped)
             .safeAreaInset(edge: .top) {
-                libraryTabPicker
+                VStack(spacing: 12) {
+                    libraryTabPicker
+
+                    if viewModel.selectedTab == .songs {
+                        songsSearchBar
+                    }
+                }
             }
             .navigationTitle("Library")
             .toolbar {
@@ -90,6 +97,11 @@ struct LibraryView: View {
                 }
             } message: { item in
                 Text("\"\(item.title)\" will be removed from your library and playlists.")
+            }
+            .onChange(of: viewModel.selectedTab) { _, selectedTab in
+                if selectedTab != .songs {
+                    songSearchText = ""
+                }
             }
         }
     }
@@ -162,7 +174,21 @@ struct LibraryView: View {
     }
 
     private var displayedMediaItems: [MediaItem] {
-        viewModel.filteredItems(from: mediaItems)
+        let baseItems = viewModel.filteredItems(from: mediaItems)
+
+        guard viewModel.selectedTab == .songs else {
+            return baseItems
+        }
+
+        let normalizedSearchText = songSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSearchText.isEmpty else {
+            return baseItems
+        }
+
+        return baseItems.filter { item in
+            item.title.localizedCaseInsensitiveContains(normalizedSearchText) ||
+            (item.creatorName?.localizedCaseInsensitiveContains(normalizedSearchText) ?? false)
+        }
     }
 
     private var displayedPlaylists: [Playlist] {
@@ -180,8 +206,44 @@ struct LibraryView: View {
             }
         }
         .pickerStyle(.segmented)
+        .font(.headline.weight(.semibold))
+        .scaleEffect(x: 1, y: 1.12, anchor: .center)
         .padding(.horizontal)
         .padding(.top, 8)
+        .padding(.bottom, viewModel.selectedTab == .songs ? 0 : 12)
+        .background(Color(.systemBackground))
+    }
+
+    private var songsSearchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+
+            TextField("Search songs", text: $songSearchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            if !songSearchText.isEmpty {
+                Button {
+                    songSearchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+        )
+        .padding(.horizontal)
         .padding(.bottom, 12)
         .background(Color(.systemBackground))
     }
@@ -196,13 +258,13 @@ struct LibraryView: View {
                         Text("Play All")
                         Text("(\(playableAudioItems.count))")
                     }
-                    .font(.subheadline.weight(.semibold))
+                    .font(.footnote.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
-                    .frame(minHeight: 44)
+                    .frame(minHeight: 36)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
+                .controlSize(.small)
                 .disabled(playableAudioItems.isEmpty)
 
                 Button {
@@ -213,12 +275,12 @@ struct LibraryView: View {
                         Text("Play Random")
                             .multilineTextAlignment(.center)
                     }
-                    .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                    .frame(minHeight: 44)
+                    .font(.footnote.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 36)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.regular)
+                .controlSize(.small)
                 .disabled(playableAudioItems.isEmpty)
             }
             .textCase(nil)
