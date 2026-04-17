@@ -5,6 +5,7 @@ import OSLog
 
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var audioPlaybackController: AudioPlaybackController
     @Query(
         sort: [
             SortDescriptor(\MediaItem.downloadedDate, order: .reverse),
@@ -76,18 +77,36 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(displayedMediaItems) { item in
-                    NavigationLink {
-                        if isPlayableAudioItem(item) {
-                            LibraryMediaDetailView(
+                    if viewModel.selectedTab == .songs {
+                        Button {
+                            playSong(item)
+                        } label: {
+                            MediaItemRow(
                                 item: item,
-                                audioPlaylist: playableAudioItems,
-                                fileStorage: fileStorage
+                                fileStorage: fileStorage,
+                                style: .song
                             )
-                        } else {
-                            LibraryMediaDetailView(item: item, fileStorage: fileStorage)
                         }
-                    } label: {
-                        MediaItemRow(item: item, fileStorage: fileStorage)
+                        .buttonStyle(.plain)
+                        .disabled(!isPlayableAudioItem(item))
+                    } else {
+                        NavigationLink {
+                            if isPlayableAudioItem(item) {
+                                LibraryMediaDetailView(
+                                    item: item,
+                                    audioPlaylist: playableAudioItems,
+                                    fileStorage: fileStorage
+                                )
+                            } else {
+                                LibraryMediaDetailView(item: item, fileStorage: fileStorage)
+                            }
+                        } label: {
+                            MediaItemRow(
+                                item: item,
+                                fileStorage: fileStorage,
+                                style: .library
+                            )
+                        }
                     }
                 }
                 .onDelete(perform: deleteItems)
@@ -236,11 +255,30 @@ struct LibraryView: View {
     private func compatibleAudioPlaylists(for item: MediaItem) -> [Playlist] {
         viewModel.compatiblePlaylists(for: item, from: playlists)
     }
+
+    private func playSong(_ item: MediaItem) {
+        guard isPlayableAudioItem(item) else {
+            return
+        }
+
+        audioPlaybackController.configure(
+            item: item,
+            playlist: playableAudioItems,
+            fileStorage: fileStorage
+        )
+        audioPlaybackController.play()
+    }
 }
 
 private struct MediaItemRow: View {
+    enum Style {
+        case library
+        case song
+    }
+
     let item: MediaItem
     let fileStorage: LocalFileStorage
+    let style: Style
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -249,24 +287,38 @@ private struct MediaItemRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(item.title)
                     .font(.headline)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(item.creatorName ?? "Unknown creator")
+                Text(artistLabel)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text("\(item.mediaType.rawValue.capitalized) • \(statusLabel)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if style == .library {
+                    Text("\(item.mediaType.rawValue.capitalized) • \(statusLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-                if let localFilePath = item.localFilePath, !localFilePath.isEmpty {
-                    Text(localFilePath)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+                    if let localFilePath = item.localFilePath, !localFilePath.isEmpty {
+                        Text(localFilePath)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
+            }
+
+            if style == .song {
+                Image(systemName: "ellipsis")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 2)
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -303,11 +355,16 @@ private struct MediaItemRow: View {
     }
 
     private var preferredRemoteThumbnailURL: URL? {
-        guard item.mediaType == .video else {
+        guard item.mediaType == .video || style == .song else {
             return nil
         }
 
         return item.thumbnailRemoteURL
+    }
+
+    private var artistLabel: String {
+        let trimmedCreator = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedCreator.isEmpty ? "Unknown artist" : trimmedCreator
     }
 
     private var statusLabel: String {
@@ -376,7 +433,7 @@ private struct LibraryMediaDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-                MediaItemRow(item: item, fileStorage: fileStorage)
+                MediaItemRow(item: item, fileStorage: fileStorage, style: .library)
 
                 VStack(alignment: .leading, spacing: Layout.itemSpacing) {
                     if isPlayableAudioItem(item) {
@@ -764,10 +821,10 @@ private struct PlaylistDetailView: View {
                                         fileStorage: fileStorage
                                     )
                                 } label: {
-                                    MediaItemRow(item: item, fileStorage: fileStorage)
+                                    MediaItemRow(item: item, fileStorage: fileStorage, style: .library)
                                 }
                             } else {
-                                MediaItemRow(item: item, fileStorage: fileStorage)
+                                MediaItemRow(item: item, fileStorage: fileStorage, style: .library)
                             }
                         }
                     }
