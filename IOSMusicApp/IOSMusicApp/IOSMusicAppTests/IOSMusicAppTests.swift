@@ -994,13 +994,13 @@ struct IOSMusicAppTests {
         let videoPlaylist = Playlist(name: "Video", mediaType: .video)
         let emptyPlaylist = Playlist(name: "Empty")
 
-        viewModel.selectedFilter = .audio
-        let audioResults = viewModel.filteredPlaylists(from: [audioPlaylist, videoPlaylist, emptyPlaylist])
-        #expect(audioResults.map(\.name) == ["Audio", "Empty"])
+        viewModel.selectedTab = .playlists
+        let playlistResults = viewModel.filteredPlaylists(from: [audioPlaylist, videoPlaylist, emptyPlaylist])
+        #expect(playlistResults.map(\.name) == ["Audio", "Empty"])
 
-        viewModel.selectedFilter = .video
-        let videoResults = viewModel.filteredPlaylists(from: [audioPlaylist, videoPlaylist, emptyPlaylist])
-        #expect(videoResults.map(\.name) == ["Video", "Empty"])
+        viewModel.selectedTab = .songs
+        let songResults = viewModel.filteredPlaylists(from: [audioPlaylist, videoPlaylist, emptyPlaylist])
+        #expect(songResults.isEmpty)
     }
 
     @Test
