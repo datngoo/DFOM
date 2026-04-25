@@ -997,11 +997,20 @@ private struct AddToPlaylistView: View {
 
 private struct PlaylistDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var audioPlaybackController: AudioPlaybackController
+    @Query(
+        sort: [
+            SortDescriptor(\Playlist.createdDate, order: .reverse),
+            SortDescriptor(\Playlist.name)
+        ]
+    ) private var playlists: [Playlist]
 
     let playlist: Playlist
     let fileStorage: LocalFileStorage
 
     @State private var errorMessage: String?
+    @State private var itemPendingPlaylistSelection: MediaItem?
+    @State private var entryPendingRemoval: PlaylistEntry?
 
     var body: some View {
         List {
@@ -1024,22 +1033,9 @@ private struct PlaylistDetailView: View {
                 } else {
                     ForEach(sortedEntries) { entry in
                         if let item = entry.mediaItem {
-                            if isPlayableAudioItem(item) {
-                                NavigationLink {
-                                    AudioPlayerView(
-                                        item: item,
-                                        playlist: playableAudioItems,
-                                        fileStorage: fileStorage
-                                    )
-                                } label: {
-                                    MediaItemRow(item: item, fileStorage: fileStorage, style: .library)
-                                }
-                            } else {
-                                MediaItemRow(item: item, fileStorage: fileStorage, style: .library)
-                            }
+                            playlistSongRow(for: entry, item: item)
                         }
                     }
-                    .onDelete(perform: removeItems)
                 }
             }
 
@@ -1052,6 +1048,35 @@ private struct PlaylistDetailView: View {
         }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $itemPendingPlaylistSelection) { item in
+            AddToPlaylistView(
+                item: item,
+                playlists: compatiblePlaylists(for: item)
+            )
+        }
+        .alert(
+            "Remove Song?",
+            isPresented: Binding(
+                get: { entryPendingRemoval != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        entryPendingRemoval = nil
+                    }
+                }
+            ),
+            presenting: entryPendingRemoval
+        ) { entry in
+            Button("Remove", role: .destructive) {
+                remove(entry: entry)
+                entryPendingRemoval = nil
+            }
+
+            Button("Cancel", role: .cancel) {
+                entryPendingRemoval = nil
+            }
+        } message: { entry in
+            Text("\"\(entry.mediaItem?.title ?? "This song")\" will be removed from this playlist.")
+        }
     }
 
     private var sortedEntries: [PlaylistEntry] {
@@ -1062,24 +1087,69 @@ private struct PlaylistDetailView: View {
         sortedEntries.compactMap(\.mediaItem).filter(isPlayableAudioItem)
     }
 
-    private func removeItems(at offsets: IndexSet) {
-        let entriesToDelete = offsets.compactMap { index in
-            sortedEntries.indices.contains(index) ? sortedEntries[index] : nil
-        }
+    private func playlistSongRow(for entry: PlaylistEntry, item: MediaItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                playSong(item)
+            } label: {
+                MediaItemRow(item: item, fileStorage: fileStorage, style: .song)
+            }
+            .buttonStyle(.plain)
+            .disabled(!isPlayableAudioItem(item))
 
-        if entriesToDelete.count == sortedEntries.count {
+            Menu {
+                Button {
+                    itemPendingPlaylistSelection = item
+                } label: {
+                    Label("Add to Playlist", systemImage: "text.badge.plus")
+                }
+
+                Button {
+                    queueSongNext(item)
+                } label: {
+                    Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                }
+                .disabled(!isPlayableAudioItem(item))
+
+                Button(role: .destructive) {
+                    entryPendingRemoval = entry
+                } label: {
+                    Label("Remove from Playlist", systemImage: "minus.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+        }
+    }
+
+    private func remove(entry: PlaylistEntry) {
+        let isRemovingLastEntry = sortedEntries.count == 1
+
+        if isRemovingLastEntry {
             playlist.setMediaType(.unknown)
         }
 
-        for entry in entriesToDelete {
-            modelContext.delete(entry)
-        }
+        modelContext.delete(entry)
 
         do {
             playlist.syncMediaTypeRawValueIfNeeded()
             try modelContext.save()
         } catch {
             errorMessage = "Could not remove item from playlist."
+        }
+    }
+
+    private func compatiblePlaylists(for item: MediaItem) -> [Playlist] {
+        guard item.mediaType == .audio else {
+            return []
+        }
+
+        return playlists.filter { candidate in
+            candidate.id != playlist.id && (candidate.mediaType == .audio || candidate.mediaType == .unknown)
         }
     }
 
@@ -1090,6 +1160,31 @@ private struct PlaylistDetailView: View {
         }
 
         return (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) != nil
+    }
+
+    private func playSong(_ item: MediaItem) {
+        guard isPlayableAudioItem(item) else {
+            return
+        }
+
+        audioPlaybackController.configure(
+            item: item,
+            playlist: playableAudioItems,
+            fileStorage: fileStorage
+        )
+        audioPlaybackController.play()
+    }
+
+    private func queueSongNext(_ item: MediaItem) {
+        guard isPlayableAudioItem(item) else {
+            return
+        }
+
+        audioPlaybackController.enqueueNext(
+            item: item,
+            from: playableAudioItems,
+            fileStorage: fileStorage
+        )
     }
 }
 
