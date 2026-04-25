@@ -36,6 +36,8 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             List {
+                libraryControlsHeader
+
                 switch viewModel.selectedTab {
                 case .songs, .videos:
                     mediaItemsSection
@@ -44,15 +46,6 @@ struct LibraryView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .safeAreaInset(edge: .top) {
-                VStack(spacing: 12) {
-                    libraryTabPicker
-
-                    if viewModel.selectedTab == .songs {
-                        songsSearchBar
-                    }
-                }
-            }
             .navigationTitle("Library")
             .toolbar {
                 if viewModel.selectedTab == .playlists {
@@ -213,6 +206,19 @@ struct LibraryView: View {
         mediaItems.filter(isPlayableAudioItem)
     }
 
+    private var libraryControlsHeader: some View {
+        VStack(spacing: 12) {
+            libraryTabPicker
+
+            if viewModel.selectedTab == .songs {
+                songsSearchBar
+            }
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color(.systemBackground))
+    }
+
     private var libraryTabPicker: some View {
         Picker("Library Section", selection: $viewModel.selectedTab) {
             ForEach(LibraryViewModel.LibraryTab.allCases) { tab in
@@ -223,7 +229,7 @@ struct LibraryView: View {
         .font(.headline.weight(.semibold))
         .scaleEffect(x: 1, y: 1.12, anchor: .center)
         .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.top, 2)
         .padding(.bottom, viewModel.selectedTab == .songs ? 0 : 12)
         .background(Color(.systemBackground))
     }
@@ -299,6 +305,7 @@ struct LibraryView: View {
             }
             .textCase(nil)
         }
+        .listSectionSpacing(5)
     }
 
     private func songRow(for item: MediaItem) -> some View {

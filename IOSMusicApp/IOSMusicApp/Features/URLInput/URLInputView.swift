@@ -113,7 +113,9 @@ struct URLInputView: View {
                         .padding(.vertical, 8)
                     }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 6)
+                .padding(.bottom)
             }
             .navigationTitle("Input")
             .navigationDestination(for: ResolvedMediaItem.self) { item in

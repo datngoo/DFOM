@@ -57,6 +57,50 @@ enum PlaybackMode: String, CaseIterable {
 }
 
 @MainActor
+final class PlaybackCoordinator {
+    static let shared = PlaybackCoordinator()
+
+    private var activeOwnerID: ObjectIdentifier?
+    private var activeKind: PlaybackKind?
+    private var stopActivePlayback: (() -> Void)?
+
+    private init() {}
+
+    func claimPlayback(
+        kind: PlaybackKind,
+        owner: AnyObject,
+        stopHandler: @escaping () -> Void
+    ) {
+        let ownerID = ObjectIdentifier(owner)
+
+        guard activeOwnerID != ownerID else {
+            activeKind = kind
+            stopActivePlayback = stopHandler
+            return
+        }
+
+        stopActivePlayback?()
+        activeOwnerID = ownerID
+        activeKind = kind
+        stopActivePlayback = stopHandler
+    }
+
+    func releasePlayback(owner: AnyObject) {
+        guard activeOwnerID == ObjectIdentifier(owner) else {
+            return
+        }
+
+        activeOwnerID = nil
+        activeKind = nil
+        stopActivePlayback = nil
+    }
+
+    func isActive(owner: AnyObject) -> Bool {
+        activeOwnerID == ObjectIdentifier(owner)
+    }
+}
+
+@MainActor
 final class PlaybackAudioSessionCoordinator {
     static let shared = PlaybackAudioSessionCoordinator()
 
@@ -397,12 +441,14 @@ final class AudioPlaybackController: ObservableObject {
     private var isReadyToPlay = false
     private var playWhenReady = false
     private var currentFileURL: URL?
+    private let playbackCoordinator: PlaybackCoordinator
     private let audioSessionCoordinator: PlaybackAudioSessionCoordinator
     private let backgroundAudioCoordinator: BackgroundAudioCoordinator
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "AudioPlaybackController")
 
     private init(fileStorage: LocalFileStorage = ApplicationSupportFileStorage()) {
         self.fileStorage = fileStorage
+        self.playbackCoordinator = .shared
         self.audioSessionCoordinator = .shared
         self.backgroundAudioCoordinator = .shared
         self.playbackMode = Self.loadPersistedPlaybackMode()
@@ -430,7 +476,6 @@ final class AudioPlaybackController: ObservableObject {
 
         self.playlist = normalizedPlaylist
         self.currentPlaylistIndex = targetIndex
-        ensureRemoteCommandsAttached()
         updatePublishedQueueState()
 
         if currentMediaItem?.id == targetItem.id, player != nil {
@@ -461,6 +506,7 @@ final class AudioPlaybackController: ObservableObject {
             return
         }
 
+        claimPlaybackOwnership()
         ensureRemoteCommandsAttached()
         playWhenReady = true
 
@@ -688,6 +734,7 @@ final class AudioPlaybackController: ObservableObject {
         currentFileURL = fileURL
         title = item.title
         logger.debug("Audio playback local file URL: \(fileURL.path, privacy: .public)")
+        claimPlaybackOwnership()
 
         let asset = AVURLAsset(url: fileURL)
         let player = player ?? AVPlayer()
@@ -1028,6 +1075,42 @@ final class AudioPlaybackController: ObservableObject {
             onPreviousTrack: { [weak self] in self?.playPreviousTrack() },
             onNextTrack: { [weak self] in self?.playNextTrack() }
         )
+    }
+
+    private func claimPlaybackOwnership() {
+        playbackCoordinator.claimPlayback(
+            kind: .audio,
+            owner: self,
+            stopHandler: { [weak self] in
+                self?.stopForExternalPlayback()
+            }
+        )
+    }
+
+    private func stopForExternalPlayback() {
+        removeObservers()
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        currentPlayerItem = nil
+        currentMediaItem = nil
+        playlist = []
+        queueItems = []
+        currentPlaylistIndex = 0
+        currentQueueIndex = 0
+        currentFileURL = nil
+        isReadyToPlay = false
+        playWhenReady = false
+        isSeeking = false
+        isPlaying = false
+        title = "Audio Player"
+        playbackStateText = "No audio selected"
+        errorMessage = nil
+        currentTime = 0
+        duration = 0
+        isPlayerPresented = false
+        backgroundAudioCoordinator.detachRemoteCommands(owner: self)
+        playbackCoordinator.releasePlayback(owner: self)
     }
 
     private func updatePlaybackMode(_ mode: PlaybackMode) {
@@ -1431,9 +1514,12 @@ final class VideoPlayerViewModel: ObservableObject {
 
     private let item: MediaItem
     private let fileStorage: LocalFileStorage
+    private let playbackCoordinator: PlaybackCoordinator
     private let audioSessionCoordinator: PlaybackAudioSessionCoordinator
     private let backgroundAudioCoordinator: BackgroundAudioCoordinator
     private var didPreparePlayer = false
+    private var remoteCommandsAttached = false
+    private var preparationToken: UUID?
     private var currentPlayerItem: AVPlayerItem?
     private var timeObserverToken: Any?
     private var itemStatusObservation: NSKeyValueObservation?
@@ -1452,22 +1538,18 @@ final class VideoPlayerViewModel: ObservableObject {
     init(item: MediaItem, fileStorage: LocalFileStorage) {
         self.item = item
         self.fileStorage = fileStorage
+        self.playbackCoordinator = .shared
         self.audioSessionCoordinator = .shared
         self.backgroundAudioCoordinator = .shared
         self.title = item.title
         self.player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-
-        backgroundAudioCoordinator.attachRemoteCommands(
-            owner: self,
-            onPlay: { [weak self] in self?.play() },
-            onPause: { [weak self] in self?.pause() }
-        )
     }
 
     deinit {
         MainActor.assumeIsolated {
             removeObservers()
             backgroundAudioCoordinator.detachRemoteCommands(owner: self)
+            playbackCoordinator.releasePlayback(owner: self)
         }
     }
 
@@ -1478,7 +1560,7 @@ final class VideoPlayerViewModel: ObservableObject {
 
         didPreparePlayer = true
         Task {
-            await preparePlayer()
+            await preparePlayer(autoplay: false)
         }
     }
 
@@ -1487,7 +1569,17 @@ final class VideoPlayerViewModel: ObservableObject {
             return
         }
 
+        claimPlaybackOwnership()
+        ensureRemoteCommandsAttached()
         playWhenReady = true
+
+        guard currentPlayerItem != nil else {
+            didPreparePlayer = true
+            Task {
+                await preparePlayer(autoplay: true)
+            }
+            return
+        }
 
         do {
             try audioSessionCoordinator.activateForPlayback(kind: .video, fileURL: currentFileURL)
@@ -1527,11 +1619,16 @@ final class VideoPlayerViewModel: ObservableObject {
         pause()
     }
 
-    private func preparePlayer() async {
+    private func preparePlayer(autoplay: Bool) async {
         guard item.localFilePath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             setError("Video file path is missing.")
             return
         }
+
+        let token = UUID()
+        preparationToken = token
+        claimPlaybackOwnership()
+        ensureRemoteCommandsAttached()
 
         let fileURL: URL
 
@@ -1551,6 +1648,10 @@ final class VideoPlayerViewModel: ObservableObject {
         do {
             let isPlayable = try await asset.load(.isPlayable)
             let audibleTracks = try await asset.loadTracks(withMediaCharacteristic: .audible)
+            guard preparationToken == token else {
+                return
+            }
+
             guard isPlayable else {
                 logger.error("Video asset is not playable for item \(self.item.id.uuidString, privacy: .public)")
                 setError("Video file is not playable.")
@@ -1570,7 +1671,7 @@ final class VideoPlayerViewModel: ObservableObject {
             removeObservers()
             currentPlayerItem = playerItem
             isReadyToPlay = false
-            playWhenReady = false
+            playWhenReady = autoplay
             currentTime = 0
             duration = 0
             player.isMuted = false
@@ -1708,6 +1809,7 @@ final class VideoPlayerViewModel: ObservableObject {
 
     private func setError(_ message: String) {
         removeObservers()
+        preparationToken = nil
         playWhenReady = false
         isReadyToPlay = false
         player.pause()
@@ -1734,6 +1836,10 @@ final class VideoPlayerViewModel: ObservableObject {
     }
 
     private func publishNowPlaying() {
+        guard playbackCoordinator.isActive(owner: self) else {
+            return
+        }
+
         backgroundAudioCoordinator.publishNowPlaying(
             item: item,
             fileStorage: fileStorage,
@@ -1741,6 +1847,48 @@ final class VideoPlayerViewModel: ObservableObject {
             duration: duration,
             isPlaying: player.timeControlStatus == .playing
         )
+    }
+
+    private func claimPlaybackOwnership() {
+        playbackCoordinator.claimPlayback(
+            kind: .video,
+            owner: self,
+            stopHandler: { [weak self] in
+                self?.stopForExternalPlayback()
+            }
+        )
+    }
+
+    private func ensureRemoteCommandsAttached() {
+        guard !remoteCommandsAttached else {
+            return
+        }
+
+        remoteCommandsAttached = true
+        backgroundAudioCoordinator.attachRemoteCommands(
+            owner: self,
+            onPlay: { [weak self] in self?.play() },
+            onPause: { [weak self] in self?.pause() }
+        )
+    }
+
+    private func stopForExternalPlayback() {
+        removeObservers()
+        preparationToken = nil
+        playWhenReady = false
+        isReadyToPlay = false
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        currentPlayerItem = nil
+        currentFileURL = nil
+        didPreparePlayer = false
+        errorMessage = nil
+        playbackStateText = "Stopped"
+        currentTime = 0
+        duration = 0
+        backgroundAudioCoordinator.detachRemoteCommands(owner: self)
+        remoteCommandsAttached = false
+        playbackCoordinator.releasePlayback(owner: self)
     }
 }
 
