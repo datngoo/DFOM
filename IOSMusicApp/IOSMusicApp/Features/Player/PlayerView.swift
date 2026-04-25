@@ -102,6 +102,7 @@ final class BackgroundAudioCoordinator {
     private var pauseHandler: (() -> Void)?
     private var previousTrackHandler: (() -> Void)?
     private var nextTrackHandler: (() -> Void)?
+    private var changePlaybackPositionHandler: ((Double) -> Void)?
     private var lastPublishedElapsedTime: Double?
 
     private init() {}
@@ -110,16 +111,19 @@ final class BackgroundAudioCoordinator {
         owner: AnyObject,
         onPlay: @escaping () -> Void,
         onPause: @escaping () -> Void,
+        onChangePlaybackPosition: ((Double) -> Void)? = nil,
         onPreviousTrack: (() -> Void)? = nil,
         onNextTrack: (() -> Void)? = nil
     ) {
         activeOwnerID = ObjectIdentifier(owner)
         playHandler = onPlay
         pauseHandler = onPause
+        changePlaybackPositionHandler = onChangePlaybackPosition
         previousTrackHandler = onPreviousTrack
         nextTrackHandler = onNextTrack
 
         if remoteCommandsRegistered {
+            commandCenter.changePlaybackPositionCommand.isEnabled = changePlaybackPositionHandler != nil
             updateTrackNavigationCommands()
             return
         }
@@ -130,7 +134,7 @@ final class BackgroundAudioCoordinator {
         commandCenter.playCommand.isEnabled = true
         commandCenter.pauseCommand.isEnabled = true
         commandCenter.togglePlayPauseCommand.isEnabled = true
-        commandCenter.changePlaybackPositionCommand.isEnabled = false
+        commandCenter.changePlaybackPositionCommand.isEnabled = changePlaybackPositionHandler != nil
         updateTrackNavigationCommands()
 
         commandCenter.playCommand.addTarget { [weak self] _ in
@@ -175,6 +179,17 @@ final class BackgroundAudioCoordinator {
             }
             return .success
         }
+
+        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
+                return .commandFailed
+            }
+
+            Task { @MainActor in
+                self?.changePlaybackPositionHandler?(event.positionTime)
+            }
+            return .success
+        }
     }
 
     func detachRemoteCommands(owner: AnyObject) {
@@ -185,8 +200,10 @@ final class BackgroundAudioCoordinator {
         activeOwnerID = nil
         playHandler = nil
         pauseHandler = nil
+        changePlaybackPositionHandler = nil
         previousTrackHandler = nil
         nextTrackHandler = nil
+        commandCenter.changePlaybackPositionCommand.isEnabled = false
         updateTrackNavigationCommands()
         clearNowPlaying()
     }
@@ -1007,6 +1024,7 @@ final class AudioPlaybackController: ObservableObject {
             owner: self,
             onPlay: { [weak self] in self?.play() },
             onPause: { [weak self] in self?.pause() },
+            onChangePlaybackPosition: { [weak self] position in self?.seek(to: position) },
             onPreviousTrack: { [weak self] in self?.playPreviousTrack() },
             onNextTrack: { [weak self] in self?.playNextTrack() }
         )
@@ -1728,49 +1746,86 @@ final class VideoPlayerViewModel: ObservableObject {
 
 struct VideoPlayerView: View {
     @StateObject private var viewModel: VideoPlayerViewModel
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    private let audioPlaybackController = AudioPlaybackController.shared
 
     init(item: MediaItem, fileStorage: LocalFileStorage = ApplicationSupportFileStorage()) {
         _viewModel = StateObject(wrappedValue: VideoPlayerViewModel(item: item, fileStorage: fileStorage))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text(viewModel.title)
-                .font(.title2)
-                .fontWeight(.semibold)
+        ZStack(alignment: .topTrailing) {
+            NativeVideoPlayerController(player: viewModel.player)
+                .ignoresSafeArea()
+                .background(Color.black)
 
-            Text(viewModel.errorMessage ?? viewModel.playbackStateText)
-                .font(.body)
-                .foregroundStyle(viewModel.errorMessage == nil ? Color.secondary : Color.red)
+            videoOverlay
+        }
+        .background(Color.black.ignoresSafeArea())
+        .onAppear {
+            audioPlaybackController.pause()
+            viewModel.prepareIfNeeded()
+        }
+        .onDisappear {
+            viewModel.handleDisappear(scenePhase: scenePhase)
+        }
+    }
 
-            VideoPlayer(player: viewModel.player)
-                .frame(maxWidth: .infinity)
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+    private var videoOverlay: some View {
+        VStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.title)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
 
-            HStack(spacing: 12) {
-                Button("Play") {
-                    viewModel.play()
+                    Text(viewModel.errorMessage ?? viewModel.playbackStateText)
+                        .font(.subheadline)
+                        .foregroundStyle(viewModel.errorMessage == nil ? Color.white.opacity(0.8) : Color.red.opacity(0.95))
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.errorMessage != nil)
 
-                Button("Pause") {
-                    viewModel.pause()
+                Spacer(minLength: 0)
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(Color.black.opacity(0.55), in: Circle())
                 }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.errorMessage != nil)
             }
 
             Spacer()
         }
-        .padding()
-        .navigationTitle("Video Player")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: viewModel.prepareIfNeeded)
-        .onDisappear {
-            viewModel.handleDisappear(scenePhase: scenePhase)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .allowsHitTesting(true)
+    }
+}
+
+private struct NativeVideoPlayerController: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = true
+        controller.allowsPictureInPicturePlayback = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
+        controller.entersFullScreenWhenPlaybackBegins = false
+        controller.exitsFullScreenWhenPlaybackEnds = false
+        controller.videoGravity = .resizeAspect
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        if controller.player !== player {
+            controller.player = player
         }
     }
 }

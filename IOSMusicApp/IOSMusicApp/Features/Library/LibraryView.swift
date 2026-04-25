@@ -22,6 +22,7 @@ struct LibraryView: View {
     @State private var isCreatePlaylistPresented = false
     @State private var itemPendingPlaylistSelection: MediaItem?
     @State private var itemPendingDeletion: MediaItem?
+    @State private var itemPendingVideoPlayback: MediaItem?
     @State private var songSearchText = ""
     private let fileStorage: LocalFileStorage
     private let logger = Logger(subsystem: "IOSMusicApp", category: "LibraryView")
@@ -75,8 +76,11 @@ struct LibraryView: View {
                     playlists: compatibleAudioPlaylists(for: item)
                 )
             }
+            .fullScreenCover(item: $itemPendingVideoPlayback) { item in
+                VideoPlayerView(item: item, fileStorage: fileStorage)
+            }
             .alert(
-                "Delete Song?",
+                "Delete Item?",
                 isPresented: Binding(
                     get: { itemPendingDeletion != nil },
                     set: { isPresented in
@@ -96,7 +100,7 @@ struct LibraryView: View {
                     itemPendingDeletion = nil
                 }
             } message: { item in
-                Text("\"\(item.title)\" will be removed from your library and playlists.")
+                Text(deleteConfirmationMessage(for: item))
             }
             .onChange(of: viewModel.selectedTab) { _, selectedTab in
                 if selectedTab != .songs {
@@ -125,25 +129,28 @@ struct LibraryView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(displayedMediaItems) { item in
-                            NavigationLink {
-                                if isPlayableAudioItem(item) {
-                                    LibraryMediaDetailView(
+                            if viewModel.selectedTab == .videos, isPlayableVideoItem(item) {
+                                videoRow(for: item)
+                            } else {
+                                NavigationLink {
+                                    if isPlayableAudioItem(item) {
+                                        LibraryMediaDetailView(
+                                            item: item,
+                                            audioPlaylist: playableAudioItems,
+                                            fileStorage: fileStorage
+                                        )
+                                    } else {
+                                        LibraryMediaDetailView(item: item, fileStorage: fileStorage)
+                                    }
+                                } label: {
+                                    MediaItemRow(
                                         item: item,
-                                        audioPlaylist: playableAudioItems,
-                                        fileStorage: fileStorage
+                                        fileStorage: fileStorage,
+                                        style: .library
                                     )
-                                } else {
-                                    LibraryMediaDetailView(item: item, fileStorage: fileStorage)
                                 }
-                            } label: {
-                                MediaItemRow(
-                                    item: item,
-                                    fileStorage: fileStorage,
-                                    style: .library
-                                )
                             }
                         }
-                        .onDelete(perform: deleteItems)
                     }
                 }
             }
@@ -331,12 +338,41 @@ struct LibraryView: View {
         }
     }
 
-    private func deleteItems(at offsets: IndexSet) {
-        let itemsToDelete = offsets.compactMap { index in
-            displayedMediaItems.indices.contains(index) ? displayedMediaItems[index] : nil
-        }
+    private func videoRow(for item: MediaItem) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                itemPendingVideoPlayback = item
+            } label: {
+                MediaItemRow(
+                    item: item,
+                    fileStorage: fileStorage,
+                    style: .library
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!isPlayableVideoItem(item))
 
-        delete(items: itemsToDelete)
+            Menu {
+                Button {
+                    itemPendingVideoPlayback = item
+                } label: {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .disabled(!isPlayableVideoItem(item))
+
+                Button(role: .destructive) {
+                    itemPendingDeletion = item
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+        }
     }
 
     private func delete(item: MediaItem) {
@@ -484,6 +520,17 @@ struct LibraryView: View {
             startAt: 0,
             fileStorage: fileStorage
         )
+    }
+
+    private func deleteConfirmationMessage(for item: MediaItem) -> String {
+        switch item.mediaType {
+        case .audio:
+            return "\"\(item.title)\" will be removed from your library and playlists."
+        case .video:
+            return "\"\(item.title)\" will be removed from your library."
+        case .unknown:
+            return "\"\(item.title)\" will be removed from your library."
+        }
     }
 }
 
