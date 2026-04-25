@@ -73,6 +73,8 @@ final class MediaItem {
 
 @Model
 final class Playlist {
+    static let podcastsName = "Podcasts"
+
     @Attribute(.unique) var id: UUID
     var name: String
     var mediaType: MediaType
@@ -106,6 +108,11 @@ final class Playlist {
 
     var itemCount: Int {
         sortedEntries.count
+    }
+
+    var isPodcastsPlaylist: Bool {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare(Self.podcastsName) == .orderedSame
     }
 
     func setMediaType(_ mediaType: MediaType) {
