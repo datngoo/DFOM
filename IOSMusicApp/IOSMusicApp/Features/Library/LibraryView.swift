@@ -65,6 +65,7 @@ struct LibraryView: View {
                 }
             }
             .task {
+                await ensureDefaultPlaylistsIfNeeded()
                 await migratePersistedManagedPathsIfNeeded()
             }
             .sheet(isPresented: $isCreatePlaylistPresented) {
@@ -187,12 +188,14 @@ struct LibraryView: View {
             return baseItems
         }
 
+        let songItems = baseItems.filter { !isPodcastOnlyItem($0) }
+
         let normalizedSearchText = songSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedSearchText.isEmpty else {
-            return baseItems
+            return songItems
         }
 
-        return baseItems.filter { item in
+        return songItems.filter { item in
             item.title.localizedCaseInsensitiveContains(normalizedSearchText) ||
             (item.creatorName?.localizedCaseInsensitiveContains(normalizedSearchText) ?? false)
         }
@@ -451,6 +454,23 @@ struct LibraryView: View {
         return normalizedPath
     }
 
+    @MainActor
+    private func ensureDefaultPlaylistsIfNeeded() async {
+        guard !playlists.contains(where: \.isPodcastsPlaylist) else {
+            return
+        }
+
+        let podcastsPlaylist = Playlist(name: Playlist.podcastsName, mediaType: .audio)
+        modelContext.insert(podcastsPlaylist)
+
+        do {
+            podcastsPlaylist.syncMediaTypeRawValueIfNeeded()
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to create default Podcasts playlist: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     private func isPlayableAudioItem(_ item: MediaItem) -> Bool {
         isPlayableLibraryItem(item, expectedMediaType: .audio)
     }
@@ -470,6 +490,12 @@ struct LibraryView: View {
 
     private func compatibleAudioPlaylists(for item: MediaItem) -> [Playlist] {
         viewModel.compatiblePlaylists(for: item, from: playlists)
+    }
+
+    private func isPodcastOnlyItem(_ item: MediaItem) -> Bool {
+        item.playlistEntries.contains { entry in
+            entry.playlist?.isPodcastsPlaylist == true
+        }
     }
 
     private func playSong(_ item: MediaItem) {
@@ -903,6 +929,11 @@ private struct CreatePlaylistView: View {
         let trimmedName = playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
             errorMessage = "Playlist name is required."
+            return
+        }
+
+        if trimmedName.localizedCaseInsensitiveCompare(Playlist.podcastsName) == .orderedSame {
+            errorMessage = "\"\(Playlist.podcastsName)\" is a system playlist and already exists."
             return
         }
 
