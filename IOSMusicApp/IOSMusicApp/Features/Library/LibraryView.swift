@@ -22,6 +22,7 @@ struct LibraryView: View {
     @State private var isCreatePlaylistPresented = false
     @State private var itemPendingPlaylistSelection: MediaItem?
     @State private var itemPendingDeletion: MediaItem?
+    @State private var itemPendingMetadataEdit: MediaItem?
     @State private var itemPendingVideoPlayback: MediaItem?
     @State private var songSearchText = ""
     private let fileStorage: LocalFileStorage
@@ -76,6 +77,9 @@ struct LibraryView: View {
                     item: item,
                     playlists: compatibleAudioPlaylists(for: item)
                 )
+            }
+            .sheet(item: $itemPendingMetadataEdit) { item in
+                EditSongMetadataView(item: item)
             }
             .fullScreenCover(item: $itemPendingVideoPlayback) { item in
                 VideoPlayerView(item: item, fileStorage: fileStorage)
@@ -312,6 +316,12 @@ struct LibraryView: View {
             .disabled(!isPlayableAudioItem(item))
 
             Menu {
+                Button {
+                    itemPendingMetadataEdit = item
+                } label: {
+                    Label("Edit Info", systemImage: "pencil")
+                }
+
                 Button {
                     itemPendingPlaylistSelection = item
                 } label: {
@@ -947,6 +957,80 @@ private struct CreatePlaylistView: View {
             dismiss()
         } catch {
             errorMessage = "Could not create playlist right now."
+        }
+    }
+}
+
+private struct EditSongMetadataView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    let item: MediaItem
+
+    @State private var songName: String
+    @State private var singerName: String
+    @State private var errorMessage: String?
+
+    init(item: MediaItem) {
+        self.item = item
+        _songName = State(initialValue: item.title)
+        _singerName = State(initialValue: item.creatorName ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Song") {
+                    TextField("Song name", text: $songName)
+                        .textInputAutocapitalization(.words)
+                }
+
+                Section("Singer") {
+                    TextField("Singer", text: $singerName)
+                        .textInputAutocapitalization(.words)
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("Edit Song")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        saveChanges()
+                    }
+                }
+            }
+        }
+    }
+
+    private func saveChanges() {
+        let trimmedSongName = songName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSongName.isEmpty else {
+            errorMessage = "Song name is required."
+            return
+        }
+
+        let trimmedSingerName = singerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        item.title = trimmedSongName
+        item.creatorName = trimmedSingerName.isEmpty ? nil : trimmedSingerName
+
+        do {
+            try modelContext.save()
+            dismiss()
+        } catch {
+            errorMessage = "Could not save the updated song info."
         }
     }
 }
