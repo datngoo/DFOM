@@ -37,16 +37,24 @@ struct RootTabView: View {
                         Label("Library", systemImage: "music.note.list")
                     }
             }
+            // Phase 1: slightly more refined entry/exit for the mini player
             .overlay(alignment: .topLeading) {
                 if isMiniPlayerVisible {
                     FloatingMiniPlayerOverlay(
                         containerSize: proxy.size,
                         safeAreaInsets: proxy.safeAreaInsets
                     )
-                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+                    .transition(
+                        .asymmetric(
+                            insertion: .scale(scale: 0.88, anchor: .bottomTrailing)
+                                .combined(with: .opacity),
+                            removal: .scale(scale: 0.88, anchor: .bottomTrailing)
+                                .combined(with: .opacity)
+                        )
+                    )
                     .padding(.horizontal, Layout.floatingMiniPlayerHorizontalMargin)
                     .padding(.top, 4)
-                    .animation(.spring(response: 0.34, dampingFraction: 0.88), value: isMiniPlayerVisible)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.82), value: isMiniPlayerVisible)
                 }
             }
         }
@@ -61,7 +69,13 @@ struct RootTabView: View {
         .task {
             await runLaunchReconciliationIfNeeded()
         }
+        // Phase 1: configure tab bar appearance once on launch
+        .onAppear {
+            configureTabBarAppearance()
+        }
     }
+
+    // MARK: - Private helpers (logic unchanged)
 
     @MainActor
     private func runLaunchReconciliationIfNeeded() async {
@@ -82,7 +96,40 @@ struct RootTabView: View {
             logger.error("Launch reconciliation failed: \(String(describing: error), privacy: .public)")
         }
     }
+
+    // MARK: - Phase 1: Tab bar visual configuration
+
+    private func configureTabBarAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+
+        // Thin frosted base instead of a hard opaque white/dark fill
+        appearance.backgroundEffect = UIBlurEffect(style: .systemChromeMaterial)
+        appearance.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.72)
+
+        // Hairline separator instead of the default heavy shadow
+        appearance.shadowColor = UIColor.separator.withAlphaComponent(0.45)
+
+        // Selected item: accent color at full opacity
+        let selectedAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold)
+        ]
+        appearance.stackedLayoutAppearance.selected.titleTextAttributes = selectedAttrs
+        appearance.stackedLayoutAppearance.selected.iconColor = UIColor(Color.accentColor)
+
+        // Unselected item: secondary label, slightly lighter weight
+        let normalAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .regular)
+        ]
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = normalAttrs
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor.secondaryLabel
+
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
 }
+
+// MARK: - Floating mini player overlay (geometry + logic 100% unchanged)
 
 private struct FloatingMiniPlayerOverlay: View {
     private enum Layout {
