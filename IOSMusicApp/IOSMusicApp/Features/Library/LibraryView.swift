@@ -82,9 +82,7 @@ struct LibraryView: View {
                 isPresented: Binding(
                     get: { itemPendingDeletion != nil },
                     set: { isPresented in
-                        if !isPresented {
-                            itemPendingDeletion = nil
-                        }
+                        if !isPresented { itemPendingDeletion = nil }
                     }
                 ),
                 presenting: itemPendingDeletion
@@ -93,7 +91,6 @@ struct LibraryView: View {
                     delete(item: item)
                     itemPendingDeletion = nil
                 }
-
                 Button("Cancel", role: .cancel) {
                     itemPendingDeletion = nil
                 }
@@ -101,19 +98,21 @@ struct LibraryView: View {
                 Text(deleteConfirmationMessage(for: item))
             }
             .onChange(of: viewModel.selectedTab) { _, selectedTab in
-                if selectedTab != .songs {
-                    songSearchText = ""
-                }
+                if selectedTab != .songs { songSearchText = "" }
             }
         }
     }
+
+    // MARK: - Section builders
 
     private var mediaItemsSection: some View {
         Group {
             if viewModel.selectedTab == .songs {
                 if displayedMediaItems.isEmpty {
-                    Text(viewModel.emptyStateDescription)
-                        .foregroundStyle(.secondary)
+                    emptyStateRow(
+                        icon: "music.note",
+                        message: viewModel.emptyStateDescription
+                    )
                 } else {
                     songsActionSection
                     ForEach(displayedMediaItems) { item in
@@ -123,8 +122,10 @@ struct LibraryView: View {
             } else {
                 Section(viewModel.sectionTitle) {
                     if displayedMediaItems.isEmpty {
-                        Text(viewModel.emptyStateDescription)
-                            .foregroundStyle(.secondary)
+                        emptyStateRow(
+                            icon: "film",
+                            message: viewModel.emptyStateDescription
+                        )
                     } else {
                         ForEach(displayedMediaItems) { item in
                             if viewModel.selectedTab == .videos, isPlayableVideoItem(item) {
@@ -161,11 +162,15 @@ struct LibraryView: View {
                 isCreatePlaylistPresented = true
             } label: {
                 Label("Create New Playlist", systemImage: "plus.circle")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Color.accentColor)
             }
 
             if displayedPlaylists.isEmpty {
-                Text(viewModel.emptyStateDescription)
-                    .foregroundStyle(.secondary)
+                emptyStateRow(
+                    icon: "music.note.list",
+                    message: viewModel.emptyStateDescription
+                )
             } else {
                 ForEach(displayedPlaylists) { playlist in
                     NavigationLink {
@@ -178,45 +183,18 @@ struct LibraryView: View {
         }
     }
 
-    private var displayedMediaItems: [MediaItem] {
-        let baseItems = viewModel.filteredItems(from: mediaItems)
-
-        guard viewModel.selectedTab == .songs else {
-            return baseItems
-        }
-
-        let songItems = baseItems.filter { !isPodcastOnlyItem($0) }
-
-        let normalizedSearchText = songSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedSearchText.isEmpty else {
-            return songItems
-        }
-
-        return songItems.filter { item in
-            item.title.localizedCaseInsensitiveContains(normalizedSearchText) ||
-            (item.creatorName?.localizedCaseInsensitiveContains(normalizedSearchText) ?? false)
-        }
-    }
-
-    private var displayedPlaylists: [Playlist] {
-        viewModel.filteredPlaylists(from: playlists)
-    }
-
-    private var playableAudioItems: [MediaItem] {
-        mediaItems.filter(isPlayableAudioItem)
-    }
+    // MARK: - Controls header
 
     private var libraryControlsHeader: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             libraryTabPicker
-
             if viewModel.selectedTab == .songs {
                 songsSearchBar
             }
         }
         .listRowInsets(EdgeInsets())
         .listRowSeparator(.hidden)
-        .listRowBackground(Color(.systemBackground))
+        .listRowBackground(Color(.systemGroupedBackground))
     }
 
     private var libraryTabPicker: some View {
@@ -226,90 +204,88 @@ struct LibraryView: View {
             }
         }
         .pickerStyle(.segmented)
-        .font(.headline.weight(.semibold))
-        .scaleEffect(x: 1, y: 1.12, anchor: .center)
-        .padding(.horizontal)
-        .padding(.top, 2)
-        .padding(.bottom, viewModel.selectedTab == .songs ? 0 : 12)
-        .background(Color(.systemBackground))
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, viewModel.selectedTab == .songs ? 10 : 14)
     }
 
     private var songsSearchBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
 
             TextField("Search songs", text: $songSearchText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .font(.subheadline)
 
             if !songSearchText.isEmpty {
                 Button {
                     songSearchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color(.tertiaryLabel))
+                        .font(.subheadline)
                 }
                 .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .scale(scale: 0.85)))
+                .animation(.easeInOut(duration: 0.15), value: songSearchText.isEmpty)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(.separator).opacity(0.15), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(.separator).opacity(0.2), lineWidth: 0.5)
         )
-        .padding(.horizontal)
+        .padding(.horizontal, 16)
         .padding(.bottom, 12)
-        .background(Color(.systemBackground))
     }
+
+    // MARK: - Play actions section
 
     private var songsActionSection: some View {
         Section {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Button {
                     playAllSongs()
                 } label: {
-                    VStack(spacing: 4) {
-                        Text("Play All")
-                        Text("(\(playableAudioItems.count))")
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 36)
+                    Label("Play All  \(playableAudioItems.count)", systemImage: "play.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .controlSize(.regular)
                 .disabled(playableAudioItems.isEmpty)
 
                 Button {
                     playRandomSongs()
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "shuffle")
-                        Text("Play Random")
-                            .multilineTextAlignment(.center)
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 36)
+                    Label("Shuffle", systemImage: "shuffle")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
                 .disabled(playableAudioItems.isEmpty)
             }
             .textCase(nil)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         }
-        .listSectionSpacing(5)
+        .listSectionSpacing(4)
     }
 
+    // MARK: - Row builders (logic unchanged, styling only)
+
     private func songRow(for item: MediaItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Button {
                 playSong(item)
             } label: {
@@ -328,20 +304,17 @@ struct LibraryView: View {
                 } label: {
                     Label("Edit Info", systemImage: "pencil")
                 }
-
                 Button {
                     itemPendingPlaylistSelection = item
                 } label: {
                     Label("Add to Playlist", systemImage: "text.badge.plus")
                 }
-
                 Button {
                     queueSongNext(item)
                 } label: {
                     Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
                 }
                 .disabled(!isPlayableAudioItem(item))
-
                 Button(role: .destructive) {
                     itemPendingDeletion = item
                 } label: {
@@ -349,17 +322,21 @@ struct LibraryView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle()
+                            .fill(Color(.tertiarySystemFill))
+                    )
+                    .contentShape(Circle())
             }
             .disabled(item.mediaType != .audio)
         }
     }
 
     private func videoRow(for item: MediaItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Button {
                 itemPendingVideoPlayback = item
             } label: {
@@ -379,7 +356,6 @@ struct LibraryView: View {
                     Label("Play", systemImage: "play.fill")
                 }
                 .disabled(!isPlayableVideoItem(item))
-
                 Button(role: .destructive) {
                     itemPendingDeletion = item
                 } label: {
@@ -387,13 +363,63 @@ struct LibraryView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle()
+                            .fill(Color(.tertiarySystemFill))
+                    )
+                    .contentShape(Circle())
             }
         }
     }
+
+    // MARK: - Empty state helper
+
+    @ViewBuilder
+    private func emptyStateRow(icon: String, message: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundStyle(.quaternary)
+                .frame(width: 44, height: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.tertiarySystemFill))
+                )
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Computed properties (unchanged)
+
+    private var displayedMediaItems: [MediaItem] {
+        let baseItems = viewModel.filteredItems(from: mediaItems)
+        guard viewModel.selectedTab == .songs else { return baseItems }
+        let songItems = baseItems.filter { !isPodcastOnlyItem($0) }
+        let normalizedSearchText = songSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSearchText.isEmpty else { return songItems }
+        return songItems.filter { item in
+            item.title.localizedCaseInsensitiveContains(normalizedSearchText) ||
+            (item.creatorName?.localizedCaseInsensitiveContains(normalizedSearchText) ?? false)
+        }
+    }
+
+    private var displayedPlaylists: [Playlist] {
+        viewModel.filteredPlaylists(from: playlists)
+    }
+
+    private var playableAudioItems: [MediaItem] {
+        mediaItems.filter(isPlayableAudioItem)
+    }
+
+    // MARK: - Private action functions (100% unchanged)
 
     private func delete(item: MediaItem) {
         delete(items: [item])
@@ -401,33 +427,26 @@ struct LibraryView: View {
 
     private func delete(items: [MediaItem]) {
         var playlistsToReset: [UUID: Playlist] = [:]
-
         for item in items {
             let entries = item.playlistEntries
-
             for entry in entries {
                 if let playlist = entry.playlist, playlist.entries.count <= 1 {
                     playlistsToReset[playlist.id] = playlist
                 }
-
                 modelContext.delete(entry)
             }
-
             do {
                 try fileStorage.deleteStoredFiles(for: item.id)
             } catch {
                 logger.error("Failed to delete stored files for item \(item.id.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
             }
-
             modelContext.delete(item)
         }
-
         do {
             for playlist in playlistsToReset.values {
                 playlist.setMediaType(.unknown)
                 playlist.syncMediaTypeRawValueIfNeeded()
             }
-
             try modelContext.save()
         } catch {
             logger.error("Failed to persist Library deletion: \(String(describing: error), privacy: .public)")
@@ -437,25 +456,19 @@ struct LibraryView: View {
     @MainActor
     private func migratePersistedManagedPathsIfNeeded() async {
         var hasChanges = false
-
         for item in mediaItems {
             if let normalizedLocalPath = normalizedManagedPathIfAvailable(item.localFilePath),
                normalizedLocalPath != item.localFilePath {
                 item.localFilePath = normalizedLocalPath
                 hasChanges = true
             }
-
             if let normalizedThumbnailPath = normalizedManagedPathIfAvailable(item.thumbnailLocalPath),
                normalizedThumbnailPath != item.thumbnailLocalPath {
                 item.thumbnailLocalPath = normalizedThumbnailPath
                 hasChanges = true
             }
         }
-
-        guard hasChanges else {
-            return
-        }
-
+        guard hasChanges else { return }
         do {
             try modelContext.save()
         } catch {
@@ -467,19 +480,14 @@ struct LibraryView: View {
         guard let normalizedPath = try? fileStorage.normalizedManagedPathIfAvailable(persistedPath) else {
             return nil
         }
-
         return normalizedPath
     }
 
     @MainActor
     private func ensureDefaultPlaylistsIfNeeded() async {
-        guard !playlists.contains(where: \.isPodcastsPlaylist) else {
-            return
-        }
-
+        guard !playlists.contains(where: \.isPodcastsPlaylist) else { return }
         let podcastsPlaylist = Playlist(name: Playlist.podcastsName, mediaType: .audio)
         modelContext.insert(podcastsPlaylist)
-
         do {
             podcastsPlaylist.syncMediaTypeRawValueIfNeeded()
             try modelContext.save()
@@ -498,10 +506,7 @@ struct LibraryView: View {
 
     private func isPlayableLibraryItem(_ item: MediaItem, expectedMediaType: MediaType) -> Bool {
         guard item.mediaType == expectedMediaType,
-              item.downloadStatus == .downloaded else {
-            return false
-        }
-
+              item.downloadStatus == .downloaded else { return false }
         return (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) != nil
     }
 
@@ -516,53 +521,25 @@ struct LibraryView: View {
     }
 
     private func playSong(_ item: MediaItem) {
-        guard isPlayableAudioItem(item) else {
-            return
-        }
-
-        audioPlaybackController.configure(
-            item: item,
-            playlist: playableAudioItems,
-            fileStorage: fileStorage
-        )
+        guard isPlayableAudioItem(item) else { return }
+        audioPlaybackController.configure(item: item, playlist: playableAudioItems, fileStorage: fileStorage)
         audioPlaybackController.play()
     }
 
     private func queueSongNext(_ item: MediaItem) {
-        guard isPlayableAudioItem(item) else {
-            return
-        }
-
-        audioPlaybackController.enqueueNext(
-            item: item,
-            from: playableAudioItems,
-            fileStorage: fileStorage
-        )
+        guard isPlayableAudioItem(item) else { return }
+        audioPlaybackController.enqueueNext(item: item, from: playableAudioItems, fileStorage: fileStorage)
     }
 
     private func playAllSongs() {
-        guard !playableAudioItems.isEmpty else {
-            return
-        }
-
-        audioPlaybackController.startQueue(
-            items: playableAudioItems,
-            startAt: 0,
-            fileStorage: fileStorage
-        )
+        guard !playableAudioItems.isEmpty else { return }
+        audioPlaybackController.startQueue(items: playableAudioItems, startAt: 0, fileStorage: fileStorage)
     }
 
     private func playRandomSongs() {
         let shuffledItems = playableAudioItems.shuffled()
-        guard !shuffledItems.isEmpty else {
-            return
-        }
-
-        audioPlaybackController.startQueue(
-            items: shuffledItems,
-            startAt: 0,
-            fileStorage: fileStorage
-        )
+        guard !shuffledItems.isEmpty else { return }
+        audioPlaybackController.startQueue(items: shuffledItems, startAt: 0, fileStorage: fileStorage)
     }
 
     private func deleteConfirmationMessage(for item: MediaItem) -> String {
@@ -577,6 +554,8 @@ struct LibraryView: View {
     }
 }
 
+// MARK: - MediaItemRow
+
 private struct MediaItemRow: View {
     enum Style {
         case library
@@ -587,40 +566,42 @@ private struct MediaItemRow: View {
     let fileStorage: LocalFileStorage
     let style: Style
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            artworkView
+    private enum ArtworkLayout {
+        static let size: CGFloat = 52
+        static let cornerRadius: CGFloat = 9
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            artworkView
+                .frame(width: ArtworkLayout.size, height: ArtworkLayout.size)
+                .clipShape(RoundedRectangle(cornerRadius: ArtworkLayout.cornerRadius, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.primary)
 
                 Text(artistLabel)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if style == .library {
-                    Text("\(item.mediaType.rawValue.capitalized) • \(statusLabel)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if let localFilePath = item.localFilePath, !localFilePath.isEmpty {
-                        Text(localFilePath)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
+                    HStack(spacing: 4) {
+                        statusChip
                     }
+                    .padding(.top, 2)
                 }
             }
-
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
+
+    // MARK: Artwork
 
     @ViewBuilder
     private var artworkView: some View {
@@ -628,18 +609,15 @@ private struct MediaItemRow: View {
             Image(uiImage: thumbnailImage)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
         } else if let remoteThumbnailURL = preferredRemoteThumbnailURL {
-            AsyncImage(url: remoteThumbnailURL) { image in
-                image
-                    .resizable()
-                    .scaledToFill()
-            } placeholder: {
-                placeholderArtwork
+            AsyncImage(url: remoteThumbnailURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    placeholderArtwork
+                }
             }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
         } else {
             placeholderArtwork
         }
@@ -651,62 +629,118 @@ private struct MediaItemRow: View {
               let thumbnailURL = try? fileStorage.resolveExistingManagedFileURL(from: thumbnailLocalPath) else {
             return nil
         }
-
         return UIImage(contentsOfFile: thumbnailURL.path)
     }
 
     private var preferredRemoteThumbnailURL: URL? {
-        guard item.mediaType == .video || style == .song else {
-            return nil
-        }
-
+        guard item.mediaType == .video || style == .song else { return nil }
         return item.thumbnailRemoteURL
     }
+
+    private var placeholderArtwork: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(.secondarySystemFill),
+                    Color(.tertiarySystemFill)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: item.mediaType == .video ? "film" : "music.note")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Status chip
+
+    @ViewBuilder
+    private var statusChip: some View {
+        let (label, color) = statusChipInfo
+        HStack(spacing: 3) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(color)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(color.opacity(0.12))
+        )
+    }
+
+    private var statusChipInfo: (String, Color) {
+        if item.downloadStatus == .downloaded,
+           item.localFilePath != nil,
+           (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) == nil {
+            return ("Unavailable", .orange)
+        }
+        switch item.downloadStatus {
+        case .downloaded:  return ("Downloaded", .green)
+        case .failed:      return ("Failed", .red)
+        case .queued:      return ("Queued", .orange)
+        case .downloading: return ("Downloading", .blue)
+        case .notDownloaded: return ("Not Downloaded", Color(.tertiaryLabel))
+        }
+    }
+
+    // MARK: Helpers
 
     private var artistLabel: String {
         let trimmedCreator = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmedCreator.isEmpty ? "Unknown artist" : trimmedCreator
     }
+}
 
-    private var statusLabel: String {
-        if item.downloadStatus == .downloaded,
-           item.localFilePath != nil,
-           (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) == nil {
-            return "Unavailable"
-        }
+// MARK: - PlaylistRow
 
-        switch item.downloadStatus {
-        case .downloaded:
-            return "Downloaded"
-        case .failed:
-            return "Failed"
-        case .queued:
-            return "Queued"
-        case .downloading:
-            return "Downloading"
-        case .notDownloaded:
-            return "Not Downloaded"
-        }
-    }
+private struct PlaylistRow: View {
+    let playlist: Playlist
 
-    private var placeholderArtwork: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .fill(Color(.secondarySystemBackground))
-            .frame(width: 64, height: 64)
-            .overlay {
-                Image(systemName: item.mediaType == .video ? "film" : "music.note")
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                LinearGradient(
+                    colors: [Color.accentColor.opacity(0.75), Color.accentColor.opacity(0.45)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(playlist.name)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Text("\(playlist.itemCount) song\(playlist.itemCount == 1 ? "" : "s")")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 }
+
+// MARK: - LibraryMediaDetailView
 
 private struct LibraryMediaDetailView: View {
     private enum Layout {
         static let screenPadding: CGFloat = 16
-        static let sectionSpacing: CGFloat = 16
-        static let itemSpacing: CGFloat = 10
-        static let cardPadding: CGFloat = 14
-        static let cardCornerRadius: CGFloat = 16
+        static let sectionSpacing: CGFloat = 20
+        static let cardPadding: CGFloat = 16
+        static let cardCornerRadius: CGFloat = 14
     }
 
     @Query(
@@ -734,9 +768,11 @@ private struct LibraryMediaDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
-                MediaItemRow(item: item, fileStorage: fileStorage, style: .library)
+                // Large artwork header
+                artworkHeader
 
-                VStack(alignment: .leading, spacing: Layout.itemSpacing) {
+                // Action buttons
+                VStack(spacing: 10) {
                     if isPlayableAudioItem(item) {
                         NavigationLink {
                             AudioPlayerView(
@@ -745,47 +781,54 @@ private struct LibraryMediaDetailView: View {
                                 fileStorage: fileStorage
                             )
                         } label: {
-                            Text("Play")
+                            Label("Play", systemImage: "play.fill")
+                                .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
+                                .frame(height: 44)
                         }
                         .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
                     } else if isPlayableVideoItem(item) {
                         NavigationLink {
                             VideoPlayerView(item: item, fileStorage: fileStorage)
                         } label: {
-                            Text("Play")
+                            Label("Play", systemImage: "play.fill")
+                                .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
+                                .frame(height: 44)
                         }
                         .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
                     }
 
                     if canAddToPlaylist(item) {
                         Button {
                             isPlaylistPickerPresented = true
                         } label: {
-                            Text("Add to Playlist")
+                            Label("Add to Playlist", systemImage: "text.badge.plus")
+                                .font(.subheadline.weight(.medium))
                                 .frame(maxWidth: .infinity)
+                                .frame(height: 44)
                         }
                         .buttonStyle(.bordered)
-                        .controlSize(.regular)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: Layout.itemSpacing) {
+                // Metadata card
+                VStack(alignment: .leading, spacing: 12) {
                     DetailValueRow(label: "Creator", value: item.creatorName ?? "Unknown creator")
+                    Divider()
                     DetailValueRow(label: "Type", value: item.mediaType.rawValue.capitalized)
+                    Divider()
                     DetailValueRow(label: "Status", value: statusLabel)
 
                     if let localFilePath = item.localFilePath, !localFilePath.isEmpty {
+                        Divider()
                         DetailValueRow(label: "Local Path", value: localFilePath)
                     }
                 }
                 .padding(Layout.cardPadding)
                 .background(
-                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius)
-                        .fill(Color(.secondarySystemBackground))
+                    RoundedRectangle(cornerRadius: Layout.cardCornerRadius, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
                 )
             }
             .padding(.horizontal, Layout.screenPadding)
@@ -801,32 +844,70 @@ private struct LibraryMediaDetailView: View {
         }
     }
 
-    private func compatiblePlaylists(for item: MediaItem) -> [Playlist] {
-        guard item.mediaType == .audio else {
-            return []
-        }
+    @ViewBuilder
+    private var artworkHeader: some View {
+        HStack(spacing: 16) {
+            // Artwork tile
+            Group {
+                if let thumbnailLocalPath = item.thumbnailLocalPath,
+                   !thumbnailLocalPath.isEmpty,
+                   let url = try? fileStorage.resolveExistingManagedFileURL(from: thumbnailLocalPath),
+                   let image = UIImage(contentsOfFile: url.path) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if let remoteURL = item.thumbnailRemoteURL {
+                    AsyncImage(url: remoteURL) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFill()
+                        default: artworkPlaceholder
+                        }
+                    }
+                } else {
+                    artworkPlaceholder
+                }
+            }
+            .frame(width: 80, height: 80)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
 
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.headline)
+                    .lineLimit(3)
+                Text(item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown artist")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var artworkPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(.secondarySystemFill), Color(.tertiarySystemFill)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Image(systemName: item.mediaType == .video ? "film" : "music.note")
+                .font(.system(size: 28, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // Logic unchanged
+    private func compatiblePlaylists(for item: MediaItem) -> [Playlist] {
+        guard item.mediaType == .audio else { return [] }
         return playlists.filter { $0.mediaType == .audio || $0.mediaType == .unknown }
     }
 
-    private func canAddToPlaylist(_ item: MediaItem) -> Bool {
-        isPlayableAudioItem(item)
-    }
-
-    private func isPlayableAudioItem(_ item: MediaItem) -> Bool {
-        isPlayableLibraryItem(item, expectedMediaType: .audio)
-    }
-
-    private func isPlayableVideoItem(_ item: MediaItem) -> Bool {
-        isPlayableLibraryItem(item, expectedMediaType: .video)
-    }
+    private func canAddToPlaylist(_ item: MediaItem) -> Bool { isPlayableAudioItem(item) }
+    private func isPlayableAudioItem(_ item: MediaItem) -> Bool { isPlayableLibraryItem(item, expectedMediaType: .audio) }
+    private func isPlayableVideoItem(_ item: MediaItem) -> Bool { isPlayableLibraryItem(item, expectedMediaType: .video) }
 
     private func isPlayableLibraryItem(_ item: MediaItem, expectedMediaType: MediaType) -> Bool {
-        guard item.mediaType == expectedMediaType,
-              item.downloadStatus == .downloaded else {
-            return false
-        }
-
+        guard item.mediaType == expectedMediaType, item.downloadStatus == .downloaded else { return false }
         return (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) != nil
     }
 
@@ -836,72 +917,44 @@ private struct LibraryMediaDetailView: View {
            (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) == nil {
             return "Unavailable"
         }
-
         switch item.downloadStatus {
-        case .downloaded:
-            return "Downloaded"
-        case .failed:
-            return "Failed"
-        case .queued:
-            return "Queued"
-        case .downloading:
-            return "Downloading"
-        case .notDownloaded:
-            return "Not Downloaded"
+        case .downloaded:    return "Downloaded"
+        case .failed:        return "Failed"
+        case .queued:        return "Queued"
+        case .downloading:   return "Downloading"
+        case .notDownloaded: return "Not Downloaded"
         }
     }
 }
+
+// MARK: - DetailValueRow
 
 private struct DetailValueRow: View {
     let label: String
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
-
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .tracking(0.3)
             Text(value)
                 .font(.subheadline)
+                .foregroundStyle(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct PlaylistRow: View {
-    let playlist: Playlist
-
-    var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(.secondarySystemBackground))
-                .frame(width: 48, height: 48)
-                .overlay {
-                    Image(systemName: "music.note.list")
-                        .foregroundStyle(.secondary)
-                }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(playlist.name)
-                    .font(.headline)
-
-                Text("Songs • \(playlist.itemCount) item\(playlist.itemCount == 1 ? "" : "s")")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
+// MARK: - CreatePlaylistView (logic unchanged, minor layout polish)
 
 private struct CreatePlaylistView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-
     @State private var playlistName = ""
     @State private var errorMessage: String?
-
     let onCreate: ((Playlist) -> Void)?
 
     init(onCreate: ((Playlist) -> Void)? = nil) {
@@ -915,11 +968,9 @@ private struct CreatePlaylistView: View {
                     TextField("New Playlist", text: $playlistName)
                         .textInputAutocapitalization(.words)
                 }
-
                 if let errorMessage {
                     Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
+                        Text(errorMessage).foregroundStyle(.red)
                     }
                 }
             }
@@ -927,16 +978,11 @@ private struct CreatePlaylistView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
+                    Button("Cancel") { dismiss() }
                 }
-
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
-                        createPlaylist()
-                    }
-                    .disabled(playlistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Create") { createPlaylist() }
+                        .disabled(playlistName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
@@ -944,19 +990,13 @@ private struct CreatePlaylistView: View {
 
     private func createPlaylist() {
         let trimmedName = playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            errorMessage = "Playlist name is required."
-            return
-        }
-
+        guard !trimmedName.isEmpty else { errorMessage = "Playlist name is required."; return }
         if trimmedName.localizedCaseInsensitiveCompare(Playlist.podcastsName) == .orderedSame {
             errorMessage = "\"\(Playlist.podcastsName)\" is a system playlist and already exists."
             return
         }
-
         let playlist = Playlist(name: trimmedName, mediaType: .audio)
         modelContext.insert(playlist)
-
         do {
             playlist.syncMediaTypeRawValueIfNeeded()
             try modelContext.save()
@@ -968,12 +1008,12 @@ private struct CreatePlaylistView: View {
     }
 }
 
+// MARK: - EditSongMetadataView (unchanged)
+
 private struct EditSongMetadataView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-
     let item: MediaItem
-
     @State private var songName: String
     @State private var singerName: String
     @State private var errorMessage: String?
@@ -991,48 +1031,29 @@ private struct EditSongMetadataView: View {
                     TextField("Song name", text: $songName)
                         .textInputAutocapitalization(.words)
                 }
-
                 Section("Singer") {
                     TextField("Singer", text: $singerName)
                         .textInputAutocapitalization(.words)
                 }
-
                 if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
+                    Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
             .navigationTitle("Edit Song")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveChanges()
-                    }
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { saveChanges() } }
             }
         }
     }
 
     private func saveChanges() {
         let trimmedSongName = songName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSongName.isEmpty else {
-            errorMessage = "Song name is required."
-            return
-        }
-
+        guard !trimmedSongName.isEmpty else { errorMessage = "Song name is required."; return }
         let trimmedSingerName = singerName.trimmingCharacters(in: .whitespacesAndNewlines)
         item.title = trimmedSongName
         item.creatorName = trimmedSingerName.isEmpty ? nil : trimmedSingerName
-
         do {
             try modelContext.save()
             dismiss()
@@ -1042,13 +1063,13 @@ private struct EditSongMetadataView: View {
     }
 }
 
+// MARK: - AddToPlaylistView (unchanged)
+
 private struct AddToPlaylistView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-
     let item: MediaItem
     let playlists: [Playlist]
-
     @State private var errorMessage: String?
     @State private var isCreatePlaylistPresented = false
 
@@ -1057,20 +1078,14 @@ private struct AddToPlaylistView: View {
             List {
                 Section("Song") {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title)
-                            .font(.headline)
-
-                        Text("Audio")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        Text(item.title).font(.headline)
+                        Text("Audio").font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
-
                 Section("Playlists") {
                     if playlists.isEmpty {
-                        Text("No song playlists yet.")
-                            .foregroundStyle(.secondary)
+                        Text("No song playlists yet.").foregroundStyle(.secondary)
                     } else {
                         ForEach(playlists) { playlist in
                             Button {
@@ -1078,19 +1093,13 @@ private struct AddToPlaylistView: View {
                             } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(playlist.name)
-                                            .foregroundStyle(.primary)
-
+                                        Text(playlist.name).foregroundStyle(.primary)
                                         Text("Songs • \(playlist.itemCount) item\(playlist.itemCount == 1 ? "" : "s")")
-                                            .font(.subheadline)
-                                            .foregroundStyle(.secondary)
+                                            .font(.subheadline).foregroundStyle(.secondary)
                                     }
-
                                     Spacer()
-
                                     if playlist.contains(item) {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.secondary)
+                                        Image(systemName: "checkmark").foregroundStyle(.secondary)
                                     }
                                 }
                             }
@@ -1098,62 +1107,32 @@ private struct AddToPlaylistView: View {
                         }
                     }
                 }
-
                 if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
+                    Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
             .navigationTitle("Add to Playlist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                }
-
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create New") {
-                        isCreatePlaylistPresented = true
-                    }
+                    Button("Create New") { isCreatePlaylistPresented = true }
                 }
             }
             .sheet(isPresented: $isCreatePlaylistPresented) {
-                CreatePlaylistView { playlist in
-                    addItem(to: playlist)
-                }
+                CreatePlaylistView { playlist in addItem(to: playlist) }
             }
         }
     }
 
     private func addItem(to playlist: Playlist) {
-        guard item.mediaType == .audio else {
-            errorMessage = "Only songs can be added to playlists."
-            return
-        }
-
-        guard playlist.canAccept(item) else {
-            errorMessage = "This playlist only supports songs."
-            return
-        }
-
-        guard !playlist.contains(item) else {
-            dismiss()
-            return
-        }
-
+        guard item.mediaType == .audio else { errorMessage = "Only songs can be added to playlists."; return }
+        guard playlist.canAccept(item) else { errorMessage = "This playlist only supports songs."; return }
+        guard !playlist.contains(item) else { dismiss(); return }
         let nextSortOrder = (playlist.entries.map(\.sortOrder).max() ?? -1) + 1
         let entry = PlaylistEntry(sortOrder: nextSortOrder, playlist: playlist, mediaItem: item)
-
-        if playlist.mediaType == .unknown {
-            playlist.setMediaType(.audio)
-        }
-
+        if playlist.mediaType == .unknown { playlist.setMediaType(.audio) }
         modelContext.insert(entry)
-
         do {
             playlist.syncMediaTypeRawValueIfNeeded()
             try modelContext.save()
@@ -1163,6 +1142,8 @@ private struct AddToPlaylistView: View {
         }
     }
 }
+
+// MARK: - PlaylistDetailView (logic unchanged, minor row polish)
 
 private struct PlaylistDetailView: View {
     @Environment(\.modelContext) private var modelContext
@@ -1185,20 +1166,29 @@ private struct PlaylistDetailView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(playlist.name)
-                        .font(.headline)
-
-                    Text("Songs • \(playlist.itemCount) item\(playlist.itemCount == 1 ? "" : "s")")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    Text(playlist.name).font(.headline)
+                    Text("\(playlist.itemCount) song\(playlist.itemCount == 1 ? "" : "s")")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
 
             Section("Songs") {
                 if sortedEntries.isEmpty {
-                    Text("Add downloaded songs from the Library to build this playlist.")
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 14) {
+                        Image(systemName: "music.note")
+                            .font(.title2)
+                            .foregroundStyle(.quaternary)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color(.tertiarySystemFill))
+                            )
+                        Text("Add downloaded songs from the Library to build this playlist.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8)
                 } else {
                     ForEach(sortedEntries) { entry in
                         if let item = entry.mediaItem {
@@ -1209,40 +1199,24 @@ private struct PlaylistDetailView: View {
             }
 
             if let errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                }
+                Section { Text(errorMessage).foregroundStyle(.red) }
             }
         }
         .navigationTitle(playlist.name)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $itemPendingPlaylistSelection) { item in
-            AddToPlaylistView(
-                item: item,
-                playlists: compatiblePlaylists(for: item)
-            )
+            AddToPlaylistView(item: item, playlists: compatiblePlaylists(for: item))
         }
         .alert(
             "Remove Song?",
             isPresented: Binding(
                 get: { entryPendingRemoval != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        entryPendingRemoval = nil
-                    }
-                }
+                set: { if !$0 { entryPendingRemoval = nil } }
             ),
             presenting: entryPendingRemoval
         ) { entry in
-            Button("Remove", role: .destructive) {
-                remove(entry: entry)
-                entryPendingRemoval = nil
-            }
-
-            Button("Cancel", role: .cancel) {
-                entryPendingRemoval = nil
-            }
+            Button("Remove", role: .destructive) { remove(entry: entry); entryPendingRemoval = nil }
+            Button("Cancel", role: .cancel) { entryPendingRemoval = nil }
         } message: { entry in
             Text("\"\(entry.mediaItem?.title ?? "This song")\" will be removed from this playlist.")
         }
@@ -1257,7 +1231,7 @@ private struct PlaylistDetailView: View {
     }
 
     private func playlistSongRow(for entry: PlaylistEntry, item: MediaItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Button {
                 playSong(item)
             } label: {
@@ -1272,14 +1246,12 @@ private struct PlaylistDetailView: View {
                 } label: {
                     Label("Add to Playlist", systemImage: "text.badge.plus")
                 }
-
                 Button {
                     queueSongNext(item)
                 } label: {
                     Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
                 }
                 .disabled(!isPlayableAudioItem(item))
-
                 Button(role: .destructive) {
                     entryPendingRemoval = entry
                 } label: {
@@ -1287,23 +1259,20 @@ private struct PlaylistDetailView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color(.tertiarySystemFill)))
+                    .contentShape(Circle())
             }
         }
     }
 
+    // Logic unchanged
     private func remove(entry: PlaylistEntry) {
         let isRemovingLastEntry = sortedEntries.count == 1
-
-        if isRemovingLastEntry {
-            playlist.setMediaType(.unknown)
-        }
-
+        if isRemovingLastEntry { playlist.setMediaType(.unknown) }
         modelContext.delete(entry)
-
         do {
             playlist.syncMediaTypeRawValueIfNeeded()
             try modelContext.save()
@@ -1313,47 +1282,26 @@ private struct PlaylistDetailView: View {
     }
 
     private func compatiblePlaylists(for item: MediaItem) -> [Playlist] {
-        guard item.mediaType == .audio else {
-            return []
-        }
-
+        guard item.mediaType == .audio else { return [] }
         return playlists.filter { candidate in
             candidate.id != playlist.id && (candidate.mediaType == .audio || candidate.mediaType == .unknown)
         }
     }
 
     private func isPlayableAudioItem(_ item: MediaItem) -> Bool {
-        guard item.mediaType == .audio,
-              item.downloadStatus == .downloaded else {
-            return false
-        }
-
+        guard item.mediaType == .audio, item.downloadStatus == .downloaded else { return false }
         return (try? fileStorage.resolveExistingManagedFileURL(from: item.localFilePath)) != nil
     }
 
     private func playSong(_ item: MediaItem) {
-        guard isPlayableAudioItem(item) else {
-            return
-        }
-
-        audioPlaybackController.configure(
-            item: item,
-            playlist: playableAudioItems,
-            fileStorage: fileStorage
-        )
+        guard isPlayableAudioItem(item) else { return }
+        audioPlaybackController.configure(item: item, playlist: playableAudioItems, fileStorage: fileStorage)
         audioPlaybackController.play()
     }
 
     private func queueSongNext(_ item: MediaItem) {
-        guard isPlayableAudioItem(item) else {
-            return
-        }
-
-        audioPlaybackController.enqueueNext(
-            item: item,
-            from: playableAudioItems,
-            fileStorage: fileStorage
-        )
+        guard isPlayableAudioItem(item) else { return }
+        audioPlaybackController.enqueueNext(item: item, from: playableAudioItems, fileStorage: fileStorage)
     }
 }
 
