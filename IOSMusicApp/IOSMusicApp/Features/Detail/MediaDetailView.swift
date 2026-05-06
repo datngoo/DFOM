@@ -150,6 +150,7 @@ struct MediaDetailView: View {
                     .frame(height: 46)
             }
             .buttonStyle(.borderedProminent)
+            .microPressFeedback()
             .disabled(viewModel.isStartingDownload || !viewModel.item.availableMediaTypes.contains(.audio))
 
             // Video button
@@ -162,6 +163,7 @@ struct MediaDetailView: View {
                     .frame(height: 46)
             }
             .buttonStyle(.bordered)
+            .microPressFeedback()
             .disabled(viewModel.isStartingDownload || !viewModel.item.availableMediaTypes.contains(.video))
 
             // Global spinner while handoff is in progress
@@ -178,7 +180,7 @@ struct MediaDetailView: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(.secondarySystemGroupedBackground))
                 )
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
 
             // Status cards
@@ -275,7 +277,10 @@ struct MediaDetailView: View {
                         lineWidth: 0.5
                     )
             )
-            .animation(.easeInOut(duration: 0.2), value: state?.status)
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: state?.status)
+            .animation(.easeInOut(duration: 0.18), value: statusMessage)
+            .animation(.easeInOut(duration: 0.18), value: errorMessage)
         }
     }
 

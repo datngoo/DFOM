@@ -113,6 +113,7 @@ struct URLInputView: View {
                         .padding(.horizontal, 4)
                 }
                 .buttonStyle(.bordered)
+                .microPressFeedback()
                 .disabled(viewModel.isLoading)
 
                 Button {
@@ -133,6 +134,7 @@ struct URLInputView: View {
                     .frame(height: 40)
                 }
                 .buttonStyle(.borderedProminent)
+                .microPressFeedback()
                 .disabled(viewModel.isLoading)
             }
         }
@@ -149,7 +151,7 @@ struct URLInputView: View {
                 message: validationMessage,
                 tint: .orange
             )
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
         }
 
         if let errorMessage = viewModel.errorMessage {
@@ -159,15 +161,15 @@ struct URLInputView: View {
                 message: errorMessage,
                 tint: .red
             )
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
         }
 
         if let resolvedItem = viewModel.resolvedItem {
             ResolvedMediaSummaryCard(item: resolvedItem)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
         } else if viewModel.isLoading {
             loadingCard
-                .transition(.opacity)
+                .transition(.opacity.combined(with: .scale(scale: 0.985)))
         }
     }
 
@@ -189,6 +191,7 @@ struct URLInputView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(.secondarySystemGroupedBackground))
         )
+        .animation(.easeInOut(duration: 0.18), value: viewModel.isLoading)
     }
 
     // MARK: - Logic (unchanged)
@@ -198,6 +201,29 @@ struct URLInputView: View {
         viewModel.urlText = pastedText
         viewModel.clearMessages()
         viewModel.clearResolvedItem()
+    }
+}
+
+struct MicroPressFeedbackModifier: ViewModifier {
+    @GestureState private var isPressed = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isPressed ? 0.98 : 1)
+            .opacity(isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.84), value: isPressed)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isPressed) { _, state, _ in
+                        state = true
+                    }
+            )
+    }
+}
+
+extension View {
+    func microPressFeedback() -> some View {
+        modifier(MicroPressFeedbackModifier())
     }
 }
 
