@@ -14,104 +14,18 @@ struct MediaDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if let thumbnailURL = viewModel.item.thumbnailURL {
-                    // AsyncImage may still emit normal thumbnail-fetch network logs.
-                    // Download-flow logs come from MediaDetailViewModel / DownloadOrchestrator / runtime transport.
-                    AsyncImage(url: thumbnailURL) { image in
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } placeholder: {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(Color(.secondarySystemBackground))
-                            ProgressView()
-                        }
-                    }
-                    .frame(height: 220)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(viewModel.item.title)
-                        .font(.title2.weight(.semibold))
-
-                    if let creatorName = viewModel.item.creatorName, !creatorName.isEmpty {
-                        Text(creatorName)
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 12) {
-                    DetailRow(label: "Provider", value: viewModel.item.provider)
-                    DetailRow(label: "Provider Item ID", value: viewModel.item.providerItemId)
-                    DetailRow(label: "Source URL", value: viewModel.item.sourcePageURL.absoluteString)
-                    DetailRow(
-                        label: "Available Types",
-                        value: viewModel.item.availableMediaTypes.map { $0.rawValue.capitalized }.joined(separator: ", ")
-                    )
-
-                    if let durationSeconds = viewModel.item.durationSeconds {
-                        DetailRow(label: "Duration", value: formattedDuration(durationSeconds))
-                    }
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(.secondarySystemBackground))
-                )
-
-                VStack(alignment: .leading, spacing: 12) {
-                    Button {
-                        Task {
-                            await viewModel.startAudioDownload()
-                        }
-                    } label: {
-                        Text("Download Audio")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isStartingDownload || !viewModel.item.availableMediaTypes.contains(.audio))
-
-                    Button {
-                        Task {
-                            await viewModel.startVideoDownload()
-                        }
-                    } label: {
-                        Text("Download Video")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isStartingDownload || !viewModel.item.availableMediaTypes.contains(.video))
-
-                    downloadStateView(
-                        title: "Audio Status",
-                        state: viewModel.audioState,
-                        statusMessage: viewModel.audioStatusMessage,
-                        errorMessage: viewModel.audioErrorMessage
-                    )
-                    downloadStateView(
-                        title: "Video Status",
-                        state: viewModel.videoState,
-                        statusMessage: viewModel.videoStatusMessage,
-                        errorMessage: viewModel.videoErrorMessage
-                    )
-
-                    if viewModel.isStartingDownload {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text("Preparing download handoff...")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                thumbnailHeader
+                metadataCard
+                downloadSection
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Detail")
         .navigationBarTitleDisplayMode(.inline)
+        // ↓ UNCHANGED — do not touch
         .task {
             logger.debug("Composing detail flow with YouTubeBridgeDownloadProvider, MediaFileDownloader, and ApplicationSupportFileStorage")
             viewModel.configureIfNeeded(
@@ -126,84 +40,281 @@ struct MediaDetailView: View {
         }
     }
 
-    private func formattedDuration(_ durationSeconds: Double) -> String {
-        let totalSeconds = Int(durationSeconds.rounded())
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
+    // MARK: - Thumbnail + title header
 
-        return String(format: "%d:%02d", minutes, seconds)
+    private var thumbnailHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let thumbnailURL = viewModel.item.thumbnailURL {
+                // AsyncImage comment preserved from original — download-flow logs come from ViewModel
+                AsyncImage(url: thumbnailURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        thumbnailPlaceholder
+                    default:
+                        ZStack {
+                            thumbnailPlaceholder
+                            ProgressView().tint(.secondary)
+                        }
+                    }
+                }
+                .frame(height: 210)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.10), radius: 10, y: 4)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(viewModel.item.title)
+                    .font(.title3.weight(.bold))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let creatorName = viewModel.item.creatorName, !creatorName.isEmpty {
+                    Text(creatorName)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
+    private var thumbnailPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(.secondarySystemFill), Color(.tertiarySystemFill)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            Image(systemName: "play.rectangle")
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - Metadata card
+
+    private var metadataCard: some View {
+        VStack(spacing: 0) {
+            metaRow(label: "Provider", value: viewModel.item.provider.capitalized)
+            Divider().padding(.leading, 16)
+            metaRow(label: "Item ID", value: viewModel.item.providerItemId)
+            Divider().padding(.leading, 16)
+            metaRow(
+                label: "Available",
+                value: viewModel.item.availableMediaTypes.map { $0.rawValue.capitalized }.joined(separator: ", ")
+            )
+            if let duration = viewModel.item.durationSeconds {
+                Divider().padding(.leading, 16)
+                metaRow(label: "Duration", value: formattedDuration(duration))
+            }
+            Divider().padding(.leading, 16)
+            metaRow(label: "Source", value: viewModel.item.sourcePageURL.absoluteString)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(.separator).opacity(0.2), lineWidth: 0.5)
+        )
+    }
+
+    private func metaRow(label: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+    }
+
+    // MARK: - Download section
+
+    private var downloadSection: some View {
+        VStack(spacing: 12) {
+            // Audio button
+            Button {
+                Task { await viewModel.startAudioDownload() }
+            } label: {
+                Label("Download Audio", systemImage: "music.note")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+            }
+            .buttonStyle(.borderedProminent)
+            .microPressFeedback()
+            .disabled(viewModel.isStartingDownload || !viewModel.item.availableMediaTypes.contains(.audio))
+
+            // Video button
+            Button {
+                Task { await viewModel.startVideoDownload() }
+            } label: {
+                Label("Download Video", systemImage: "film")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+            }
+            .buttonStyle(.bordered)
+            .microPressFeedback()
+            .disabled(viewModel.isStartingDownload || !viewModel.item.availableMediaTypes.contains(.video))
+
+            // Global spinner while handoff is in progress
+            if viewModel.isStartingDownload {
+                HStack(spacing: 10) {
+                    ProgressView().tint(.accentColor)
+                    Text("Preparing download…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemGroupedBackground))
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+
+            // Status cards
+            downloadStateCard(
+                mediaType: "Audio",
+                icon: "music.note",
+                state: viewModel.audioState,
+                statusMessage: viewModel.audioStatusMessage,
+                errorMessage: viewModel.audioErrorMessage
+            )
+
+            downloadStateCard(
+                mediaType: "Video",
+                icon: "film",
+                state: viewModel.videoState,
+                statusMessage: viewModel.videoStatusMessage,
+                errorMessage: viewModel.videoErrorMessage
+            )
+        }
+    }
+
+    // MARK: - Download state card
+
     @ViewBuilder
-    private func downloadStateView(
-        title: String,
+    private func downloadStateCard(
+        mediaType: String,
+        icon: String,
         state: DownloadStateSnapshot?,
         statusMessage: String?,
         errorMessage: String?
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let state {
-                Text(statusLabel(for: state))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                if let progress = state.progress, state.status == .downloading {
-                    ProgressView(value: progress)
+        let hasContent = state != nil || statusMessage != nil || errorMessage != nil
+        if hasContent {
+            VStack(alignment: .leading, spacing: 10) {
+                // Title row
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("\(mediaType) Status")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.3)
+                    Spacer()
+                    if let state {
+                        statusBadge(for: state)
+                    }
                 }
-            } else {
-                Text("Not started")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
 
-            if let statusMessage {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                // Progress bar (downloading only)
+                if let state, let progress = state.progress, state.status == .downloading {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: progress)
+                            .tint(.accentColor)
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
-            if let errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                // Status message
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Error message
+                if let errorMessage {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        errorMessage != nil
+                            ? Color.red.opacity(0.2)
+                            : Color(.separator).opacity(0.18),
+                        lineWidth: 0.5
+                    )
+            )
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .animation(.spring(response: 0.32, dampingFraction: 0.86), value: state?.status)
+            .animation(.easeInOut(duration: 0.18), value: statusMessage)
+            .animation(.easeInOut(duration: 0.18), value: errorMessage)
         }
     }
 
-    private func statusLabel(for state: DownloadStateSnapshot) -> String {
-        switch state.status {
-        case .notDownloaded:
-            return "Not downloaded"
-        case .queued:
-            return "Queued"
-        case .downloading:
-            let percentage = Int((state.progress ?? 0) * 100)
-            return "Downloading \(percentage)%"
-        case .downloaded:
-            return "Downloaded"
-        case .failed:
-            return "Failed"
-        }
-    }
-}
-
-private struct DetailRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+    @ViewBuilder
+    private func statusBadge(for state: DownloadStateSnapshot) -> some View {
+        let (label, color) = statusBadgeInfo(for: state)
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 5, height: 5)
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Text(value)
-                .font(.subheadline)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(color)
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(color.opacity(0.1)))
+    }
+
+    private func statusBadgeInfo(for state: DownloadStateSnapshot) -> (String, Color) {
+        switch state.status {
+        case .notDownloaded: return ("Not started", Color(.tertiaryLabel))
+        case .queued:        return ("Queued", .orange)
+        case .downloading:   return ("Downloading", .blue)
+        case .downloaded:    return ("Done", .green)
+        case .failed:        return ("Failed", .red)
+        }
+    }
+
+    // MARK: - Helpers (unchanged logic)
+
+    private func formattedDuration(_ durationSeconds: Double) -> String {
+        let totalSeconds = Int(durationSeconds.rounded())
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 

@@ -1162,115 +1162,23 @@ struct AudioPlayerView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if let currentMediaItem = playbackController.currentMediaItem {
-                    Text(currentMediaItem.title)
-                        .font(.title3.weight(.semibold))
-                        .lineLimit(2)
-                }
-
-                Text(playbackController.errorMessage ?? playbackController.playbackStateText)
-                    .font(.body)
-                    .foregroundStyle(playbackController.errorMessage == nil ? Color.secondary : Color.red)
-
-                VStack(spacing: 12) {
-                    Slider(
-                        value: Binding(
-                            get: { min(playbackController.currentTime, playbackController.displayedDuration) },
-                            set: { playbackController.seek(to: $0) }
-                        ),
-                        in: 0...playbackController.displayedDuration
-                    )
-                    .disabled(!playbackController.canControlPlayback || playbackController.displayedDuration <= 0)
-
-                    HStack {
-                        Text(playbackController.formattedTime(playbackController.currentTime))
-                        Spacer()
-                        Text(playbackController.formattedTime(playbackController.duration))
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                Button {
-                    playbackController.cyclePlaybackMode()
-                } label: {
-                    Label(playbackController.playbackMode.title, systemImage: playbackController.playbackMode.symbolName)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!playbackController.canControlPlayback)
-
-                if !playbackController.queueItems.isEmpty {
-                    Button {
-                        isQueuePresented = true
-                    } label: {
-                        HStack {
-                            Label("Queue", systemImage: "list.bullet")
-                            Spacer()
-                            Text("\(playbackController.queueItems.count)")
-                                .foregroundStyle(.secondary)
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                VStack(spacing: 18) {
-                    Text("Playback Controls")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-
-                    HStack(spacing: 20) {
-                        playerControlButton(
-                            systemName: "backward.fill",
-                            size: 52,
-                            isPrimary: false,
-                            isDisabled: !playbackController.canPlayPreviousTrack
-                        ) {
-                            playbackController.playPreviousTrack()
-                        }
-
-                        playerControlButton(
-                            systemName: playbackController.isPlaying ? "pause.fill" : "play.fill",
-                            size: 62,
-                            isPrimary: true,
-                            isDisabled: !playbackController.canControlPlayback
-                        ) {
-                            playbackController.togglePlayback()
-                        }
-
-                        playerControlButton(
-                            systemName: "forward.fill",
-                            size: 52,
-                            isPrimary: false,
-                            isDisabled: !playbackController.canPlayNextTrack
-                        ) {
-                            playbackController.playNextTrack()
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 20)
-                .background(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color(.separator).opacity(0.18), lineWidth: 1)
-                )
-
-                Spacer(minLength: 8)
+            VStack(spacing: 0) {
+                artworkSection
+                    .padding(.top, 28)
+                    .padding(.bottom, 28)
+                trackInfoSection
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
+                scrubberSection
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
+                controlsSection
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 28)
+                secondarySection
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
             }
-            .padding(.horizontal)
-            .padding(.top, 24)
-            .padding(.bottom, 16)
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -1286,43 +1194,183 @@ struct AudioPlayerView: View {
         }
     }
 
-    private func queueArtistLabel(for item: MediaItem) -> String {
-        let creatorName = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return creatorName.isEmpty ? "Unknown artist" : creatorName
+    // MARK: Artwork
+
+    private var artworkSection: some View {
+        Group {
+            if let currentItem = playbackController.currentMediaItem {
+                artworkImage(for: currentItem)
+            } else {
+                artworkPlaceholder(icon: "music.note")
+            }
+        }
+        .frame(width: 220, height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+        .animation(.easeInOut(duration: 0.2), value: playbackController.currentMediaItem?.id)
+    }
+
+    @ViewBuilder
+    private func artworkImage(for item: MediaItem) -> some View {
+        if let localPath = item.thumbnailLocalPath,
+           !localPath.isEmpty,
+           let url = try? fileStorage.resolveExistingManagedFileURL(from: localPath),
+           let uiImage = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: uiImage).resizable().scaledToFill()
+        } else if let remoteURL = item.thumbnailRemoteURL {
+            AsyncImage(url: remoteURL) { phase in
+                switch phase {
+                case .success(let image): image.resizable().scaledToFill()
+                default: artworkPlaceholder(icon: "music.note")
+                }
+            }
+        } else {
+            artworkPlaceholder(icon: "music.note")
+        }
+    }
+
+    private func artworkPlaceholder(icon: String) -> some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(.secondarySystemFill), Color(.tertiarySystemFill)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            Image(systemName: icon)
+                .font(.system(size: 56, weight: .light))
+                .foregroundStyle(.quaternary)
+        }
+    }
+
+    // MARK: Track info
+
+    private var trackInfoSection: some View {
+        VStack(spacing: 6) {
+            if let currentItem = playbackController.currentMediaItem {
+                Text(currentItem.title)
+                    .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity)
+                let artist = currentItem.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !artist.isEmpty {
+                    Text(artist)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            let stateText = playbackController.errorMessage ?? playbackController.playbackStateText
+            let isError = playbackController.errorMessage != nil
+            Text(stateText)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(isError ? Color.red : Color.secondary)
+                .padding(.top, 2)
+        }
+    }
+
+    // MARK: Scrubber
+
+    private var scrubberSection: some View {
+        VStack(spacing: 6) {
+            Slider(
+                value: Binding(
+                    get: { min(playbackController.currentTime, playbackController.displayedDuration) },
+                    set: { playbackController.seek(to: $0) }
+                ),
+                in: 0...playbackController.displayedDuration
+            )
+            .tint(Color.accentColor)
+            .disabled(!playbackController.canControlPlayback || playbackController.displayedDuration <= 0)
+
+            HStack {
+                Text(playbackController.formattedTime(playbackController.currentTime))
+                Spacer()
+                Text(playbackController.formattedTime(playbackController.duration))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.tertiary)
+            .monospacedDigit()
+        }
+    }
+
+    // MARK: Controls
+
+    private var controlsSection: some View {
+        HStack(spacing: 0) {
+            playerControlButton(
+                systemName: "backward.fill", size: 50,
+                iconFont: .title2.weight(.semibold),
+                isPrimary: false, isDisabled: !playbackController.canPlayPreviousTrack
+            ) { playbackController.playPreviousTrack() }
+
+            Spacer()
+
+            playerControlButton(
+                systemName: playbackController.isPlaying ? "pause.fill" : "play.fill", size: 68,
+                iconFont: .title.weight(.semibold),
+                isPrimary: true, isDisabled: !playbackController.canControlPlayback
+            ) { playbackController.togglePlayback() }
+
+            Spacer()
+
+            playerControlButton(
+                systemName: "forward.fill", size: 50,
+                iconFont: .title2.weight(.semibold),
+                isPrimary: false, isDisabled: !playbackController.canPlayNextTrack
+            ) { playbackController.playNextTrack() }
+        }
+        .padding(.horizontal, 8)
     }
 
     private func playerControlButton(
-        systemName: String,
-        size: CGFloat,
-        isPrimary: Bool,
-        isDisabled: Bool,
-        action: @escaping () -> Void
+        systemName: String, size: CGFloat, iconFont: Font,
+        isPrimary: Bool, isDisabled: Bool, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(isPrimary ? .title3.weight(.semibold) : .headline.weight(.semibold))
+                .font(iconFont)
                 .frame(width: size, height: size)
-                .foregroundStyle(isPrimary ? Color.white : Color.primary)
-                .background(
-                    Circle()
-                        .fill(isPrimary ? Color.accentColor : Color(.systemBackground))
-                )
-                .overlay(
-                    Circle()
-                        .stroke(
-                            isPrimary ? Color.accentColor.opacity(0.2) : Color(.separator).opacity(0.18),
-                            lineWidth: 1
-                        )
-                )
+                .foregroundStyle(isPrimary ? .white : .primary)
+                .background(Circle().fill(isPrimary ? Color.accentColor : Color(.secondarySystemFill)))
                 .shadow(
-                    color: isPrimary ? Color.accentColor.opacity(0.22) : Color.black.opacity(0.06),
-                    radius: isPrimary ? 12 : 6,
-                    y: isPrimary ? 6 : 2
+                    color: isPrimary ? Color.accentColor.opacity(0.30) : .black.opacity(0.06),
+                    radius: isPrimary ? 16 : 4, y: isPrimary ? 6 : 2
                 )
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .opacity(isDisabled ? 0.45 : 1)
+        .opacity(isDisabled ? 0.4 : 1)
+        .animation(.easeInOut(duration: 0.12), value: isDisabled)
+    }
+
+    // MARK: Secondary
+
+    private var secondarySection: some View {
+        HStack(spacing: 10) {
+            Button { playbackController.cyclePlaybackMode() } label: {
+                Label(playbackController.playbackMode.title,
+                      systemImage: playbackController.playbackMode.symbolName)
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.accentColor)
+            .disabled(!playbackController.canControlPlayback)
+
+            if !playbackController.queueItems.isEmpty {
+                Button { isQueuePresented = true } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.bullet")
+                        Text("\(playbackController.queueItems.count)")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .frame(height: 40)
+                    .padding(.horizontal, 14)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
     }
 }
 
@@ -1336,7 +1384,7 @@ private struct QueueManagementView: View {
                 ForEach(Array(playbackController.queueItems.enumerated()), id: \.element.id) { index, item in
                     QueueListRow(
                         item: item,
-                        artistLabel: queueArtistLabel(for: item),
+                        artistLabel: artistLabel(for: item),
                         isCurrent: index == playbackController.currentQueueIndex,
                         onRemove: { playbackController.removeQueueItem(id: item.id) }
                     )
@@ -1352,16 +1400,14 @@ private struct QueueManagementView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") {
-                    dismiss()
-                }
+                Button("Done") { dismiss() }
             }
         }
     }
 
-    private func queueArtistLabel(for item: MediaItem) -> String {
-        let creatorName = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return creatorName.isEmpty ? "Unknown artist" : creatorName
+    private func artistLabel(for item: MediaItem) -> String {
+        let name = item.creatorName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "Unknown artist" : name
     }
 }
 
@@ -1402,26 +1448,29 @@ private struct QueueListRow: View {
 
 struct GlobalAudioMiniPlayer: View {
     private enum Layout {
-        static let contentSpacing: CGFloat = 9
-        static let horizontalPadding: CGFloat = 15
-        static let verticalPadding: CGFloat = 11
-        static let buttonSize: CGFloat = 36
+        static let artworkSize: CGFloat = 36
+        static let artworkCornerRadius: CGFloat = 7
+        static let buttonSize: CGFloat = 34
         static let cornerRadius: CGFloat = 20
-        static let progressHeight: CGFloat = 3
-        static let progressCornerRadius: CGFloat = 2
+        static let progressHeight: CGFloat = 2.5
     }
 
     @EnvironmentObject private var playbackController: AudioPlaybackController
+    private let fileStorage: LocalFileStorage = ApplicationSupportFileStorage()
 
     var body: some View {
         if let currentMediaItem = playbackController.currentMediaItem {
             Button {
                 playbackController.presentFullPlayer()
             } label: {
-                VStack(alignment: .leading, spacing: Layout.contentSpacing) {
-                    HStack(spacing: 12) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        artworkView(for: currentMediaItem)
+                            .frame(width: Layout.artworkSize, height: Layout.artworkSize)
+                            .clipShape(RoundedRectangle(cornerRadius: Layout.artworkCornerRadius, style: .continuous))
+
                         Text(currentMediaItem.title)
-                            .font(.subheadline.weight(.semibold))
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -1431,50 +1480,30 @@ struct GlobalAudioMiniPlayer: View {
                             playbackController.togglePlayback()
                         } label: {
                             Image(systemName: playbackController.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.subheadline.weight(.bold))
+                                .font(.caption.weight(.bold))
                                 .frame(width: Layout.buttonSize, height: Layout.buttonSize)
                                 .foregroundStyle(.primary)
-                                .background(
-                                    Circle()
-                                        .fill(Color.white.opacity(0.18))
-                                )
-                                .overlay(
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.22), lineWidth: 0.8)
-                                )
+                                .background(Circle().fill(Color.white.opacity(0.18)))
+                                .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 0.7))
                         }
                         .buttonStyle(.plain)
                     }
 
                     GeometryReader { proxy in
                         ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.15))
                             Capsule()
-                                .fill(Color.white.opacity(0.18))
-
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.accentColor.opacity(0.92),
-                                            Color.accentColor.opacity(0.72)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: max(proxy.size.width * playbackController.progressFraction, 6))
+                                .fill(LinearGradient(
+                                    colors: [Color.accentColor.opacity(0.95), Color.accentColor.opacity(0.7)],
+                                    startPoint: .leading, endPoint: .trailing
+                                ))
+                                .frame(width: max(proxy.size.width * playbackController.progressFraction, 5))
                         }
                     }
                     .frame(height: Layout.progressHeight)
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: Layout.progressCornerRadius,
-                            style: .continuous
-                        )
-                    )
                 }
-                .padding(.horizontal, Layout.horizontalPadding)
-                .padding(.vertical, Layout.verticalPadding)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
                         .fill(.ultraThinMaterial)
@@ -1483,26 +1512,48 @@ struct GlobalAudioMiniPlayer: View {
                     RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.35),
-                                    Color.white.opacity(0.1)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                                colors: [Color.white.opacity(0.35), Color.white.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
                             ),
-                            lineWidth: 0.9
+                            lineWidth: 0.8
                         )
                 )
-                .overlay(alignment: .top) {
-                    RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                        .blur(radius: 0.3)
-                }
-                .shadow(color: Color.black.opacity(0.12), radius: 14, y: 7)
+                .shadow(color: Color.black.opacity(0.14), radius: 14, y: 6)
                 .shadow(color: Color.black.opacity(0.04), radius: 2, y: 1)
             }
             .buttonStyle(.plain)
             .contentShape(RoundedRectangle(cornerRadius: Layout.cornerRadius, style: .continuous))
+        }
+    }
+
+    @ViewBuilder
+    private func artworkView(for item: MediaItem) -> some View {
+        if let localPath = item.thumbnailLocalPath,
+           !localPath.isEmpty,
+           let url = try? fileStorage.resolveExistingManagedFileURL(from: localPath),
+           let uiImage = UIImage(contentsOfFile: url.path) {
+            Image(uiImage: uiImage).resizable().scaledToFill()
+        } else if let remoteURL = item.thumbnailRemoteURL {
+            AsyncImage(url: remoteURL) { phase in
+                switch phase {
+                case .success(let image): image.resizable().scaledToFill()
+                default: miniArtworkPlaceholder
+                }
+            }
+        } else {
+            miniArtworkPlaceholder
+        }
+    }
+
+    private var miniArtworkPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(.secondarySystemFill), Color(.tertiarySystemFill)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            Image(systemName: "music.note")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -1511,6 +1562,9 @@ struct GlobalAudioMiniPlayer: View {
 final class VideoPlayerViewModel: ObservableObject {
     @Published var playbackStateText = "Preparing"
     @Published var errorMessage: String?
+    @Published private(set) var currentTimeSeconds: Double = 0
+    @Published private(set) var durationSeconds: Double = 0
+    @Published private(set) var isPlaying = false
 
     private let item: MediaItem
     private let fileStorage: LocalFileStorage
@@ -1533,6 +1587,7 @@ final class VideoPlayerViewModel: ObservableObject {
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "VideoPlayerViewModel")
 
     let title: String
+    let creatorName: String?
     let player = AVPlayer()
 
     init(item: MediaItem, fileStorage: LocalFileStorage) {
@@ -1542,6 +1597,7 @@ final class VideoPlayerViewModel: ObservableObject {
         self.audioSessionCoordinator = .shared
         self.backgroundAudioCoordinator = .shared
         self.title = item.title
+        self.creatorName = item.creatorName
         self.player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
     }
 
@@ -1560,7 +1616,7 @@ final class VideoPlayerViewModel: ObservableObject {
 
         didPreparePlayer = true
         Task {
-            await preparePlayer(autoplay: false)
+            await preparePlayer(autoplay: true)
         }
     }
 
@@ -1609,6 +1665,43 @@ final class VideoPlayerViewModel: ObservableObject {
         playWhenReady = false
         player.pause()
         publishNowPlaying()
+    }
+
+    func togglePlayback() {
+        isPlaying ? pause() : play()
+    }
+
+    func seek(to seconds: Double) {
+        guard currentPlayerItem != nil else {
+            return
+        }
+
+        let upperBound = max(durationSeconds, duration, 0)
+        let clampedSeconds = min(max(seconds, 0), upperBound)
+        let targetTime = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
+        player.seek(to: targetTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        currentTime = clampedSeconds
+        currentTimeSeconds = clampedSeconds
+        publishNowPlaying()
+    }
+
+    func seekBy(_ offset: Double) {
+        seek(to: currentTimeSeconds + offset)
+    }
+
+    func formattedTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, !seconds.isNaN else {
+            return "0:00"
+        }
+
+        let totalSeconds = max(Int(seconds.rounded(.down)), 0)
+        let minutes = totalSeconds / 60
+        let secondsComponent = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, secondsComponent)
+    }
+
+    var remainingTimeText: String {
+        "-\(formattedTime(max(durationSeconds - currentTimeSeconds, 0)))"
     }
 
     func handleDisappear(scenePhase: ScenePhase) {
@@ -1674,6 +1767,9 @@ final class VideoPlayerViewModel: ObservableObject {
             playWhenReady = autoplay
             currentTime = 0
             duration = 0
+            currentTimeSeconds = 0
+            durationSeconds = 0
+            isPlaying = false
             player.isMuted = false
             player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
             player.replaceCurrentItem(with: playerItem)
@@ -1753,6 +1849,7 @@ final class VideoPlayerViewModel: ObservableObject {
             isReadyToPlay = true
             errorMessage = nil
             duration = resolvedDuration(from: currentPlayerItem)
+            durationSeconds = duration
             playbackStateText = player.timeControlStatus == .playing ? "Playing" : "Ready"
             publishNowPlaying()
 
@@ -1776,16 +1873,19 @@ final class VideoPlayerViewModel: ObservableObject {
 
         switch status {
         case .paused:
+            isPlaying = false
             if errorMessage == nil {
                 playbackStateText = isReadyToPlay ? "Ready" : "Loading"
             }
             publishNowPlaying()
         case .waitingToPlayAtSpecifiedRate:
+            isPlaying = false
             if errorMessage == nil {
                 playbackStateText = "Buffering"
             }
             publishNowPlaying()
         case .playing:
+            isPlaying = true
             errorMessage = nil
             playbackStateText = "Playing"
             publishNowPlaying()
@@ -1797,13 +1897,17 @@ final class VideoPlayerViewModel: ObservableObject {
     private func handlePeriodicTimeUpdate(_ time: CMTime) {
         currentTime = max(time.seconds, 0)
         duration = max(duration, resolvedDuration(from: currentPlayerItem))
+        currentTimeSeconds = currentTime
+        durationSeconds = duration
         publishNowPlaying()
     }
 
     private func handlePlaybackEnded() {
         playWhenReady = false
+        isPlaying = false
         playbackStateText = "Finished"
         currentTime = duration
+        currentTimeSeconds = currentTime
         publishNowPlaying()
     }
 
@@ -1819,6 +1923,9 @@ final class VideoPlayerViewModel: ObservableObject {
         playbackStateText = "Unavailable"
         currentTime = 0
         duration = 0
+        currentTimeSeconds = 0
+        durationSeconds = 0
+        isPlaying = false
         backgroundAudioCoordinator.clearNowPlaying()
     }
 
@@ -1886,6 +1993,9 @@ final class VideoPlayerViewModel: ObservableObject {
         playbackStateText = "Stopped"
         currentTime = 0
         duration = 0
+        currentTimeSeconds = 0
+        durationSeconds = 0
+        isPlaying = false
         backgroundAudioCoordinator.detachRemoteCommands(owner: self)
         remoteCommandsAttached = false
         playbackCoordinator.releasePlayback(owner: self)
@@ -1896,6 +2006,12 @@ struct VideoPlayerView: View {
     @StateObject private var viewModel: VideoPlayerViewModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @State private var requestedLandscapeFullscreen = false
+    @State private var areControlsVisible = true
+    @State private var areLandscapeControlsVisible = true
+    @State private var isScrubbing = false
+    @State private var scrubPosition = 0.0
+    @State private var landscapeControlsHideToken = UUID()
     private let audioPlaybackController = AudioPlaybackController.shared
 
     init(item: MediaItem, fileStorage: LocalFileStorage = ApplicationSupportFileStorage()) {
@@ -1903,12 +2019,35 @@ struct VideoPlayerView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            NativeVideoPlayerController(player: viewModel.player)
-                .ignoresSafeArea()
-                .background(Color.black)
+        GeometryReader { geometry in
+            let isLandscape = geometry.size.width > geometry.size.height
+            let portraitWidth = max(geometry.size.width - 40, 0)
+            let videoWidth = min(portraitWidth, 760)
+            let videoHeight = videoWidth * 9 / 16
 
-            videoOverlay
+            ZStack {
+                cinematicBackground
+
+                if isLandscape {
+                    landscapeLayout(geometry: geometry)
+                } else {
+                    portraitLayout(
+                        topSafeArea: geometry.safeAreaInsets.top,
+                        bottomSafeArea: geometry.safeAreaInsets.bottom,
+                        videoWidth: videoWidth,
+                        videoHeight: videoHeight
+                    )
+                }
+            }
+            .onAppear {
+                updateFullscreenControlsVisibility(isLandscape: isLandscape)
+            }
+            .onChange(of: isLandscape) { _, newValue in
+                updateFullscreenControlsVisibility(isLandscape: newValue)
+            }
+            .onChange(of: viewModel.isPlaying) { _, isPlaying in
+                handlePlaybackStateChange(isPlaying: isPlaying, isLandscape: isLandscape)
+            }
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
@@ -1916,43 +2055,429 @@ struct VideoPlayerView: View {
             viewModel.prepareIfNeeded()
         }
         .onDisappear {
+            landscapeControlsHideToken = UUID()
+            if requestedLandscapeFullscreen {
+                VideoPlayerOrientationHelper.requestOrientation(.portrait)
+            }
             viewModel.handleDisappear(scenePhase: scenePhase)
         }
     }
 
-    private var videoOverlay: some View {
-        VStack(spacing: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(viewModel.title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
+    private var cinematicBackground: some View {
+        ZStack {
+            Color.black
+            LinearGradient(
+                colors: [Color.white.opacity(0.03), Color.clear, Color.black.opacity(0.45)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            RadialGradient(
+                colors: [Color.white.opacity(0.05), Color.clear, Color.black.opacity(0.72)],
+                center: .center,
+                startRadius: 40,
+                endRadius: 600
+            )
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
 
-                    Text(viewModel.errorMessage ?? viewModel.playbackStateText)
-                        .font(.subheadline)
-                        .foregroundStyle(viewModel.errorMessage == nil ? Color.white.opacity(0.8) : Color.red.opacity(0.95))
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
+    private func portraitLayout(
+        topSafeArea: CGFloat,
+        bottomSafeArea: CGFloat,
+        videoWidth: CGFloat,
+        videoHeight: CGFloat
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                chromeButton(systemName: "xmark") {
                     dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(Color.black.opacity(0.55), in: Circle())
                 }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, max(topSafeArea, 12) + 4)
+
+            titleCard
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+
+            Spacer(minLength: 28)
+
+            videoStage(
+                width: videoWidth,
+                height: videoHeight,
+                cornerRadius: 24,
+                controlsVisible: areControlsVisible
+            ) {
+                handlePortraitVideoTap()
             }
 
-            Spacer()
+            Spacer(minLength: 28)
+
+            bottomArea(bottomSafeArea: bottomSafeArea, showFullscreenButton: true)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .allowsHitTesting(true)
+    }
+
+    private func landscapeLayout(geometry: GeometryProxy) -> some View {
+        ZStack {
+            videoStage(
+                width: geometry.size.width,
+                height: geometry.size.height,
+                cornerRadius: 0,
+                controlsVisible: areLandscapeControlsVisible
+            ) {
+                handleLandscapeVideoTap()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                if areLandscapeControlsVisible {
+                    HStack {
+                        subtleFullscreenButton(systemName: "arrow.down.right.and.arrow.up.left") {
+                            requestedLandscapeFullscreen = false
+                            landscapeControlsHideToken = UUID()
+                            VideoPlayerOrientationHelper.requestOrientation(.portrait)
+                        }
+                        .accessibilityLabel("Exit fullscreen")
+
+                        Spacer()
+                    }
+                    .padding(.leading, 18)
+                    .padding(.top, max(geometry.safeAreaInsets.top, 8) + 4)
+                    .transition(.opacity)
+                }
+
+                Spacer()
+
+                if areLandscapeControlsVisible {
+                    landscapeBottomArea(
+                        bottomSafeArea: geometry.safeAreaInsets.bottom,
+                        availableWidth: geometry.size.width
+                    )
+                        .padding(.horizontal, 20)
+                        .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    private var titleCard: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(viewModel.title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(viewModel.errorMessage ?? viewModel.playbackStateText)
+                    .font(.caption)
+                    .foregroundStyle(viewModel.errorMessage == nil ? Color.white.opacity(0.68) : Color.red.opacity(0.92))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private func videoStage(
+        width: CGFloat,
+        height: CGFloat,
+        cornerRadius: CGFloat,
+        controlsVisible: Bool,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        ZStack {
+            NativeVideoPlayerController(player: viewModel.player)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+
+            if controlsVisible {
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.14),
+                        Color.black.opacity(0.22),
+                        Color.black.opacity(0.14)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+
+                HStack(spacing: 28) {
+                    transportButton(systemName: "gobackward.10", size: 50, iconScale: 0.34) {
+                        viewModel.seekBy(-10)
+                    }
+
+                    transportButton(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill", size: 66, iconScale: 0.36) {
+                        viewModel.togglePlayback()
+                    }
+
+                    transportButton(systemName: "goforward.10", size: 50, iconScale: 0.34) {
+                        viewModel.seekBy(10)
+                    }
+                }
+                .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
+                .transition(.opacity)
+            }
+        }
+        .frame(width: width, height: height)
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.white.opacity(cornerRadius > 0 ? 0.04 : 0))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(cornerRadius > 0 ? 0.08 : 0), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
+        .animation(.easeInOut(duration: 0.2), value: controlsVisible)
+    }
+
+    private func bottomArea(bottomSafeArea: CGFloat, showFullscreenButton: Bool) -> some View {
+        VStack(spacing: 10) {
+            progressBarArea(showMinimizeButton: false)
+
+            if showFullscreenButton {
+                HStack {
+                    Spacer()
+                    chromeButton(
+                        systemName: requestedLandscapeFullscreen
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right"
+                    ) {
+                        requestedLandscapeFullscreen.toggle()
+                        VideoPlayerOrientationHelper.requestOrientation(
+                            requestedLandscapeFullscreen ? .landscapeRight : .portrait
+                        )
+                    }
+                    .accessibilityLabel(requestedLandscapeFullscreen ? "Exit fullscreen rotation" : "Rotate fullscreen")
+                }
+            }
+        }
+        .padding(.horizontal, showFullscreenButton ? 16 : 0)
+        .padding(.bottom, max(bottomSafeArea, 12) + (showFullscreenButton ? 4 : 8))
+    }
+
+    private func landscapeBottomArea(bottomSafeArea: CGFloat, availableWidth: CGFloat) -> some View {
+        HStack(spacing: 12) {
+            Text(viewModel.formattedTime(isScrubbing ? scrubPosition : viewModel.currentTimeSeconds))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Color.white.opacity(0.78))
+                .frame(width: 52, alignment: .leading)
+
+            Slider(
+                value: Binding(
+                    get: { isScrubbing ? scrubPosition : viewModel.currentTimeSeconds },
+                    set: { scrubPosition = $0 }
+                ),
+                in: 0...max(viewModel.durationSeconds, 1),
+                onEditingChanged: handleScrubbingChanged
+            )
+            .tint(.white)
+            .disabled(viewModel.durationSeconds <= 0)
+            .labelsHidden()
+
+            Text(viewModel.durationSeconds > 0 ? viewModel.remainingTimeText : viewModel.formattedTime(0))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Color.white.opacity(0.78))
+                .frame(width: 52, alignment: .trailing)
+        }
+        .frame(maxWidth: min(max(availableWidth - 96, 280), 720))
+        .padding(.bottom, max(bottomSafeArea, 12) + 18)
+    }
+
+    private func progressBarArea(showMinimizeButton: Bool) -> some View {
+        VStack(spacing: 10) {
+            Slider(
+                value: Binding(
+                    get: { isScrubbing ? scrubPosition : viewModel.currentTimeSeconds },
+                    set: { scrubPosition = $0 }
+                ),
+                in: 0...max(viewModel.durationSeconds, 1),
+                onEditingChanged: handleScrubbingChanged
+            )
+            .tint(.white)
+            .disabled(viewModel.durationSeconds <= 0)
+            .labelsHidden()
+
+            HStack {
+                Text(viewModel.formattedTime(isScrubbing ? scrubPosition : viewModel.currentTimeSeconds))
+                    .frame(minWidth: 44, alignment: .leading)
+
+                Spacer(minLength: 12)
+
+                Text(viewModel.durationSeconds > 0 ? viewModel.remainingTimeText : viewModel.formattedTime(0))
+                    .frame(minWidth: 56, alignment: .trailing)
+
+                if !showMinimizeButton {
+                    Spacer(minLength: 0)
+                }
+
+                if showMinimizeButton {
+                    chromeButton(systemName: "arrow.down.right.and.arrow.up.left") {
+                        requestedLandscapeFullscreen = false
+                        landscapeControlsHideToken = UUID()
+                        VideoPlayerOrientationHelper.requestOrientation(.portrait)
+                    }
+                    .accessibilityLabel("Exit fullscreen")
+                }
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(Color.white.opacity(0.72))
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private func chromeButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(Color.black.opacity(0.42), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.06), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func subtleFullscreenButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(width: 32, height: 32)
+                .background(Color.black.opacity(0.28), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.05), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func transportButton(systemName: String, size: CGFloat, iconScale: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: size * iconScale, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func handleScrubbingChanged(_ isEditing: Bool) {
+        isScrubbing = isEditing
+
+        if isEditing {
+            scrubPosition = viewModel.currentTimeSeconds
+            landscapeControlsHideToken = UUID()
+        } else {
+            viewModel.seek(to: scrubPosition)
+            if viewModel.isPlaying {
+                scheduleLandscapeControlsAutoHide()
+            }
+        }
+    }
+
+    private func handleLandscapeVideoTap() {
+        let shouldShowControls = !areLandscapeControlsVisible
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            areLandscapeControlsVisible = shouldShowControls
+        }
+
+        landscapeControlsHideToken = UUID()
+
+        if shouldShowControls, viewModel.isPlaying {
+            scheduleLandscapeControlsAutoHide()
+        }
+    }
+
+    private func handlePortraitVideoTap() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            areControlsVisible.toggle()
+        }
+    }
+
+    private func handlePlaybackStateChange(isPlaying: Bool, isLandscape: Bool) {
+        guard isLandscape else {
+            return
+        }
+
+        landscapeControlsHideToken = UUID()
+
+        if isPlaying {
+            if areLandscapeControlsVisible {
+                scheduleLandscapeControlsAutoHide()
+            }
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                areLandscapeControlsVisible = true
+            }
+        }
+    }
+
+    private func updateFullscreenControlsVisibility(isLandscape: Bool) {
+        landscapeControlsHideToken = UUID()
+
+        guard isLandscape else {
+            areLandscapeControlsVisible = true
+            return
+        }
+
+        let shouldShowControls = !viewModel.isPlaying
+        areLandscapeControlsVisible = shouldShowControls
+
+        if !shouldShowControls {
+            scheduleLandscapeControlsAutoHide()
+        }
+    }
+
+    private func scheduleLandscapeControlsAutoHide() {
+        let token = UUID()
+        landscapeControlsHideToken = token
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            guard self.landscapeControlsHideToken == token, self.viewModel.isPlaying, !self.isScrubbing else {
+                return
+            }
+
+            withAnimation(.easeInOut(duration: 0.2)) {
+                self.areLandscapeControlsVisible = false
+            }
+        }
+    }
+}
+
+private enum VideoPlayerOrientationHelper {
+    static func requestOrientation(_ orientation: UIInterfaceOrientation) {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else {
+            return
+        }
+
+        let mask: UIInterfaceOrientationMask = orientation.isLandscape ? .landscape : .portrait
+
+        // SwiftUI does not expose a guaranteed fullscreen AVPlayer rotation API,
+        // so we request scene geometry changes and let iOS decide whether to honor them.
+        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+
+        if let rootViewController = windowScene.keyWindow?.rootViewController {
+            rootViewController.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
     }
 }
 
@@ -1962,12 +2487,13 @@ private struct NativeVideoPlayerController: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let controller = AVPlayerViewController()
         controller.player = player
-        controller.showsPlaybackControls = true
+        controller.showsPlaybackControls = false
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = false
         controller.entersFullScreenWhenPlaybackBegins = false
         controller.exitsFullScreenWhenPlaybackEnds = false
         controller.videoGravity = .resizeAspect
+        controller.view.backgroundColor = .clear
         return controller
     }
 
