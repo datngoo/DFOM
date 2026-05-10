@@ -108,6 +108,34 @@ struct IOSMusicAppTests {
     }
 
     @Test
+    func youTubeExtractorBridgeConfigurationUsesCentralRemoteBaseURLWhenPresent() throws {
+        let configuration = YouTubeExtractorBridgeConfiguration(
+            bundle: .main,
+            environment: [:],
+            bridgeConfig: BridgeConfig(remoteBaseURL: " https://bridge.example.com ")
+        )
+
+        let url = try configuration.bridgeBaseURL()
+
+        #expect(url.absoluteString == "https://bridge.example.com")
+    }
+
+    @Test
+    func youTubeExtractorBridgeConfigurationPrefersEnvironmentOverrideOverCentralRemoteBaseURL() throws {
+        let configuration = YouTubeExtractorBridgeConfiguration(
+            bundle: .main,
+            environment: [
+                "YOUTUBE_EXTRACTOR_BRIDGE_BASE_URL": "https://override.example.com"
+            ],
+            bridgeConfig: BridgeConfig(remoteBaseURL: "https://bridge.example.com")
+        )
+
+        let url = try configuration.bridgeBaseURL()
+
+        #expect(url.absoluteString == "https://override.example.com")
+    }
+
+    @Test
     func youTubeRuntimeDownloadProviderResolvesBestDirectAudioStream() async throws {
         let provider = YouTubeRuntimeDownloadProvider(
             playerResponseProvider: TestYouTubePlayerResponseProvider(

@@ -49,6 +49,7 @@
 		B51395B62F83891C007C0D92 /* MediaFileDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51395B72F83891C007C0D92 /* MediaFileDownloader.swift */; };
 		B51395B82F83891D007C0D92 /* DownloadOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51395B92F83891D007C0D92 /* DownloadOrchestrator.swift */; };
 		B51395BA2F83891E007C0D92 /* FakeMediaFileDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51395BB2F83891E007C0D92 /* FakeMediaFileDownloader.swift */; };
+		B51395BD2F900001007C0D92 /* BridgeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51395BC2F900001007C0D92 /* BridgeConfig.swift */; };
 		B5591B982F8BF5B100649039 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B5591B972F8BF5B100649039 /* Assets.xcassets */; };
 		B5FF1001261A4E0A9B58F001 /* LaunchMediaReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5FF1000261A4E0A9B58F001 /* LaunchMediaReconciler.swift */; };
 		B6AA1001261A4E0A9B58F001 /* YouTubeRuntimeDownloadProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6AA1000261A4E0A9B58F001 /* YouTubeRuntimeDownloadProvider.swift */; };
@@ -125,6 +126,7 @@
 		B51395B72F83891C007C0D93 /* YouTubeWatchPageClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeWatchPageClient.swift; sourceTree = "<group>"; };
 		B51395B92F83891D007C0D92 /* DownloadOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadOrchestrator.swift; sourceTree = "<group>"; };
 		B51395BB2F83891E007C0D92 /* FakeMediaFileDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeMediaFileDownloader.swift; sourceTree = "<group>"; };
+		B51395BC2F900001007C0D92 /* BridgeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeConfig.swift; sourceTree = "<group>"; };
 		B5591B972F8BF5B100649039 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B5FF1000261A4E0A9B58F001 /* LaunchMediaReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchMediaReconciler.swift; sourceTree = "<group>"; };
 		B6AA1000261A4E0A9B58F001 /* YouTubeRuntimeDownloadProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeRuntimeDownloadProvider.swift; sourceTree = "<group>"; };
@@ -367,6 +369,7 @@
 		B51395602F837D14007C0D92 /* Networking */ = {
 			isa = PBXGroup;
 			children = (
+				B51395BC2F900001007C0D92 /* BridgeConfig.swift */,
 				B51395BB2F83891E007C0D92 /* FakeMediaFileDownloader.swift */,
 				B51395B72F83891C007C0D92 /* MediaFileDownloader.swift */,
 				B7BA2002261A4E0A9B58F001 /* YouTubeExtractorBridgeClient.swift */,
@@ -596,6 +599,7 @@
 				B513959E2F83890F007C0D92 /* ProviderSpikeDebugRunner.swift in Sources */,
 				B51395A02F838910007C0D92 /* URLInputViewModel.swift in Sources */,
 				B51395A22F838911007C0D92 /* YouTubeMetadataClient.swift in Sources */,
+				B51395BD2F900001007C0D92 /* BridgeConfig.swift in Sources */,
 				B7BA2003261A4E0A9B58F001 /* YouTubeExtractorBridgeClient.swift in Sources */,
 				B7BA2005261A4E0A9B58F001 /* YouTubeExtractorBridgeConfiguration.swift in Sources */,
 				B51395A42F838912007C0D92 /* YouTubeVideoDTO.swift in Sources */,

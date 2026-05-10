@@ -1,6 +1,16 @@
 export type SupportedProvider = "youtube";
 export type MediaType = "audio" | "video";
 
+export interface ResolveRequestBody {
+  url: string;
+}
+
+export interface DownloadRequestBody {
+  url: string;
+  title?: string;
+  providerItemId?: string;
+}
+
 export interface ResolveDownloadRequestBody {
   provider: SupportedProvider;
   providerItemId: string;
@@ -22,8 +32,21 @@ export interface ErrorResponse {
 }
 
 export interface HealthResponse {
-  status: "ok";
+  ok: true;
   service: string;
-  port: number;
-  timestamp: string;
+}
+
+export interface APIErrorResponse {
+  ok: false;
+  error: string;
+}
+
+export interface ResolveResponse {
+  ok: true;
+  provider: SupportedProvider;
+  providerItemId: string;
+  sourcePageURL: string;
+  availableMediaTypes: MediaType[];
+  audio: ResolveDownloadSuccessResponse | null;
+  video: ResolveDownloadSuccessResponse | null;
 }

@@ -1,10 +1,9 @@
 import type { NextFunction, Request, Response } from "express";
 
 import { ExtractorFailureError, HttpError } from "../errors/httpErrors.js";
-import type { ErrorResponse } from "../types/api.js";
 import { logger } from "../utils/logger.js";
 
-export const notFoundHandler = (_req: Request, res: Response<ErrorResponse>): void => {
+export const notFoundHandler = (_req: Request, res: Response): void => {
   res.status(404).json({
     error: "invalid_request",
     message: "Route not found."
@@ -14,7 +13,7 @@ export const notFoundHandler = (_req: Request, res: Response<ErrorResponse>): vo
 export const errorHandler = (
   error: unknown,
   req: Request,
-  res: Response<ErrorResponse>,
+  res: Response,
   _next: NextFunction
 ): void => {
   const httpError =
@@ -30,6 +29,14 @@ export const errorHandler = (
     message: httpError.message,
     stack: error instanceof Error ? error.stack : undefined
   });
+
+  if (res.locals.apiResponseShape === "standard") {
+    res.status(httpError.statusCode).json({
+      ok: false,
+      error: httpError.message
+    });
+    return;
+  }
 
   res.status(httpError.statusCode).json({
     error: httpError.errorCode,

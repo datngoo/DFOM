@@ -17,6 +17,7 @@ interface AudioDownloadTicket {
   providerItemId: string;
   sourcePageURL: string;
   expiresAt: number;
+  title?: string;
 }
 
 export interface PreparedAudioDownload {
@@ -50,6 +51,25 @@ export class YouTubeAudioProxyService {
     this.cleanupExpiredTickets();
 
     const ticket = this.getTicket(token);
+    return this.prepareAudioDownloadForTicket(ticket);
+  }
+
+  public async prepareAudioDownloadFromSource(input: {
+    providerItemId: string;
+    sourcePageURL: string;
+    title?: string;
+  }): Promise<PreparedAudioDownload> {
+    return this.prepareAudioDownloadForTicket({
+      providerItemId: input.providerItemId,
+      sourcePageURL: input.sourcePageURL,
+      expiresAt: Date.now() + AUDIO_PROXY_TTL_MS,
+      ...(input.title ? { title: input.title } : {})
+    });
+  }
+
+  private async prepareAudioDownloadForTicket(
+    ticket: AudioDownloadTicket
+  ): Promise<PreparedAudioDownload> {
     const workDirectory = await mkdtemp(path.join(tmpdir(), "youtube-extractor-bridge-audio-"));
     const outputTemplate = path.join(workDirectory, "download.%(ext)s");
     const ytDlpArgs = buildAudioDownloadArgs(ticket.sourcePageURL, outputTemplate);
@@ -76,7 +96,7 @@ export class YouTubeAudioProxyService {
         cleanup: async () => {
           await rm(workDirectory, { recursive: true, force: true });
         },
-        fileName: `${sanitizeFileName(ticket.providerItemId)}.m4a`,
+        fileName: `${sanitizeFileName(ticket.title ?? ticket.providerItemId)}.m4a`,
         filePath,
         stream
       };

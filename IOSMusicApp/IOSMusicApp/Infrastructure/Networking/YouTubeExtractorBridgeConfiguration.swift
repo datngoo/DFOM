@@ -20,22 +20,19 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
         }
     }
 
-    static let infoDictionaryKey = "YOUTUBE_EXTRACTOR_BRIDGE_BASE_URL"
-    static let environmentOverrideKey = "YOUTUBE_EXTRACTOR_BRIDGE_BASE_URL"
-    static let debugDeviceHostInfoDictionaryKey = "YOUTUBE_EXTRACTOR_BRIDGE_DEBUG_DEVICE_HOST"
-    static let debugPortInfoDictionaryKey = "YOUTUBE_EXTRACTOR_BRIDGE_DEBUG_PORT"
-    static let defaultDebugPort = 8080
-
     private let bundle: Bundle
-    private let processInfo: ProcessInfo
+    private let environment: [String: String]
+    private let bridgeConfig: BridgeConfig
     private let logger = Logger(subsystem: "com.bo.IOSMusicApp", category: "YouTubeExtractorBridgeConfiguration")
 
     init(
         bundle: Bundle = .main,
-        processInfo: ProcessInfo = .processInfo
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bridgeConfig: BridgeConfig = .current
     ) {
         self.bundle = bundle
-        self.processInfo = processInfo
+        self.environment = environment
+        self.bridgeConfig = bridgeConfig
     }
 
     func bridgeBaseURL() throws -> URL {
@@ -61,6 +58,7 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
             """
             Resolved YouTube extractor bridge base URL: \(url.absoluteString, privacy: .public) \
             source=\(resolution.source, privacy: .public) \
+            mode=\(resolution.mode, privacy: .public) \
             runtime=\(runtimeEnvironmentLabel, privacy: .public)
             """
         )
@@ -70,48 +68,65 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
     }
 
     private func resolveBridgeBaseURL() -> BridgeBaseURLResolution {
-        if let environmentValue = normalizedString(processInfo.environment[Self.environmentOverrideKey]) {
+        if let environmentValue = normalizedString(environment[bridgeConfig.environmentOverrideKey]) {
             return BridgeBaseURLResolution(
                 rawValue: environmentValue,
-                source: "environment"
+                source: "environment",
+                mode: "override"
             )
         }
 
-        if let configuredBaseURL = normalizedString(bundle.object(forInfoDictionaryKey: Self.infoDictionaryKey) as? String) {
+        if let configuredRemoteBaseURL = bridgeConfig.remoteBaseURL {
+            return BridgeBaseURLResolution(
+                rawValue: configuredRemoteBaseURL,
+                source: "bridge-config-remote-base-url",
+                mode: "remote"
+            )
+        }
+
+        if let configuredBaseURL = normalizedString(
+            bundle.object(forInfoDictionaryKey: bridgeConfig.legacyInfoDictionaryKey) as? String
+        ) {
             return BridgeBaseURLResolution(
                 rawValue: configuredBaseURL,
-                source: "info-plist-base-url"
+                source: "info-plist-base-url",
+                mode: "override"
             )
         }
 
         if let debugDeviceBaseURL = debugDeviceBaseURL() {
             return BridgeBaseURLResolution(
                 rawValue: debugDeviceBaseURL,
-                source: "debug-device-host-port"
+                source: "debug-device-host-port",
+                mode: "local"
             )
         }
 
         if let simulatorFallbackBaseURL = debugSimulatorFallbackBaseURL() {
             return BridgeBaseURLResolution(
                 rawValue: simulatorFallbackBaseURL,
-                source: "debug-simulator-fallback"
+                source: "debug-simulator-fallback",
+                mode: "local"
             )
         }
 
         return BridgeBaseURLResolution(
             rawValue: nil,
-            source: "missing"
+            source: "missing",
+            mode: "missing"
         )
     }
 
     private func debugDeviceBaseURL() -> String? {
         #if DEBUG
         #if !targetEnvironment(simulator)
-        guard let host = normalizedString(bundle.object(forInfoDictionaryKey: Self.debugDeviceHostInfoDictionaryKey) as? String) else {
+        guard let host = normalizedString(
+            bundle.object(forInfoDictionaryKey: bridgeConfig.debugDeviceHostInfoDictionaryKey) as? String
+        ) else {
             return nil
         }
 
-        let port = normalizedPort(bundle.object(forInfoDictionaryKey: Self.debugPortInfoDictionaryKey))
+        let port = normalizedPort(bundle.object(forInfoDictionaryKey: bridgeConfig.debugPortInfoDictionaryKey))
         return "http://\(host):\(port)"
         #else
         return nil
@@ -124,7 +139,7 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
     private func debugSimulatorFallbackBaseURL() -> String? {
         #if DEBUG
         #if targetEnvironment(simulator)
-        return "http://127.0.0.1:\(Self.defaultDebugPort)"
+        return "http://127.0.0.1:\(bridgeConfig.defaultDebugPort)"
         #else
         return nil
         #endif
@@ -156,7 +171,7 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
             return port
         }
 
-        return Self.defaultDebugPort
+        return bridgeConfig.defaultDebugPort
     }
 
     private var runtimeEnvironmentLabel: String {
@@ -171,4 +186,5 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
 private struct BridgeBaseURLResolution {
     let rawValue: String?
     let source: String
+    let mode: String
 }
