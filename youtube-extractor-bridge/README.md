@@ -62,8 +62,7 @@ npm run dev
 Production-style build:
 
 ```bash
-npm run build
-npm start
+npm run start
 ```
 
 The server listens on `0.0.0.0:8080` by default.
@@ -79,6 +78,7 @@ Optional environment variables:
 - `HOST` defaults to `0.0.0.0`
 - `NODE_ENV` defaults to `development`
 - `YT_DLP_PYTHON_PATH` optionally points to a specific Python `3.10+` binary if your machine has multiple Python installations
+- `.env.example` is included as a local template, but real `.env` files should not be committed
 
 For real-device testing, do not bind the bridge only to `127.0.0.1`, because a physical iPhone cannot reach the Mac through that loopback address.
 
@@ -100,12 +100,21 @@ Expected response:
 
 ```json
 {
-  "status": "ok",
-  "service": "youtube-extractor-bridge",
-  "port": 8080,
-  "timestamp": "2026-04-10T00:00:00.000Z"
+  "ok": true,
+  "service": "youtube-extractor-bridge"
 }
 ```
+
+## Cloud deployment
+
+The bridge is prepared for free-host deployment such as Render.
+
+- root directory: `youtube-extractor-bridge`
+- build command: `npm install`
+- start command: `npm run start`
+- required environment variables: none
+
+See [DEPLOYMENT.md](/Users/datngo/DFOM/youtube-extractor-bridge/DEPLOYMENT.md) for the minimal deployment checklist.
 
 ## Resolve download examples
 

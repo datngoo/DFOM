@@ -110,8 +110,8 @@ final class MediaDetailViewModel: ObservableObject {
                 setErrorMessage("The download finished but could not be stored locally.", for: mediaType)
             case .persistenceFailed:
                 setErrorMessage("The download state could not be saved.", for: mediaType)
-            case .downloadFailed:
-                setErrorMessage("The \(mediaType.rawValue) download failed.", for: mediaType)
+            case .downloadFailed(let message):
+                setErrorMessage(message ?? "The \(mediaType.rawValue) download failed.", for: mediaType)
             }
         } catch let error as ProviderError {
             logger.error("Provider error while starting \(mediaType.rawValue, privacy: .public) download for \(self.item.providerItemId, privacy: .public): \(String(describing: error), privacy: .public)")

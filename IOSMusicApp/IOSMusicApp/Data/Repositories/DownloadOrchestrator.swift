@@ -233,7 +233,7 @@ final class DownloadOrchestrator: DownloadOrchestrating {
                 stage: "downloader transport",
                 underlyingError: error
             )
-            throw DownloadOrchestratorError.downloadFailed
+            throw DownloadOrchestratorError.downloadFailed(userFacingDownloadFailureMessage(for: error, mediaType: mediaType))
         }
 
         let storedMediaKind = try storedMediaKind(for: mediaType)
@@ -279,7 +279,7 @@ final class DownloadOrchestrator: DownloadOrchestrating {
                 stage: "download post-processing",
                 underlyingError: error
             )
-            throw DownloadOrchestratorError.downloadFailed
+            throw DownloadOrchestratorError.downloadFailed(userFacingDownloadFailureMessage(for: error, mediaType: mediaType))
         }
 
         do {
@@ -293,7 +293,7 @@ final class DownloadOrchestrator: DownloadOrchestrating {
                 stage: "playability validation",
                 underlyingError: error
             )
-            throw DownloadOrchestratorError.downloadFailed
+            throw DownloadOrchestratorError.downloadFailed(userFacingDownloadFailureMessage(for: error, mediaType: mediaType))
         }
 
         do {
@@ -509,6 +509,16 @@ final class DownloadOrchestrator: DownloadOrchestrating {
         }
     }
 
+    private func userFacingDownloadFailureMessage(for error: Error, mediaType: MediaType) -> String {
+        if let localizedError = error as? LocalizedError,
+           let message = localizedError.errorDescription,
+           !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return message
+        }
+
+        return "The \(mediaType.rawValue) download failed."
+    }
+
     private func markFailedIfPossible(
         for mediaItem: MediaItem,
         mediaType: MediaType,
@@ -546,7 +556,7 @@ private extension AVAssetExportSession {
                 case .failed:
                     continuation.resume(throwing: self.error ?? MediaFileDownloaderError.unplayableDownloadedMedia)
                 case .cancelled:
-                    continuation.resume(throwing: MediaFileDownloaderError.transportFailed)
+                    continuation.resume(throwing: MediaFileDownloaderError.transportFailed("The download was cancelled before the media file could be prepared."))
                 default:
                     continuation.resume(throwing: self.error ?? MediaFileDownloaderError.unplayableDownloadedMedia)
                 }

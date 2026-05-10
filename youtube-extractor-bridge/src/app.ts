@@ -10,6 +10,7 @@ import { resolveDownloadRouter, youtubeAudioProxyService } from "./routes/resolv
 export const createApp = () => {
   const app = express();
 
+  app.set("trust proxy", true);
   app.use(express.json({ limit: "64kb" }));
   app.use(requestLogger);
 

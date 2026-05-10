@@ -6,7 +6,7 @@ enum DownloadOrchestratorError: Error, Equatable, LocalizedError {
     case unsupportedMediaType
     case fileStorageFailed
     case persistenceFailed
-    case downloadFailed
+    case downloadFailed(String?)
 
     var errorDescription: String? {
         switch self {
@@ -20,8 +20,8 @@ enum DownloadOrchestratorError: Error, Equatable, LocalizedError {
             return "The downloaded file could not be stored locally."
         case .persistenceFailed:
             return "The media library could not be updated."
-        case .downloadFailed:
-            return "The file download failed."
+        case .downloadFailed(let message):
+            return message ?? "The file download failed."
         }
     }
 }

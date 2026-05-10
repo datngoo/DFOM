@@ -5,7 +5,7 @@ enum ProviderError: Error, Equatable, LocalizedError {
     case unsupportedURL
     case metadataFetchFailed
     case mappingFailed
-    case downloadResolutionFailed
+    case downloadResolutionFailed(String?)
     case unsupportedMediaType
     case notImplementedInSpike
 
@@ -19,8 +19,8 @@ enum ProviderError: Error, Equatable, LocalizedError {
             return "The provider could not fetch media metadata."
         case .mappingFailed:
             return "The provider could not map source data into app models."
-        case .downloadResolutionFailed:
-            return "The provider could not resolve a downloadable media variant."
+        case .downloadResolutionFailed(let message):
+            return message ?? "The provider could not resolve a downloadable media variant."
         case .unsupportedMediaType:
             return "The requested media type is not supported."
         case .notImplementedInSpike:

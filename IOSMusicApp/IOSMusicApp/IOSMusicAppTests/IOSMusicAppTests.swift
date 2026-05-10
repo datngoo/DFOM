@@ -61,7 +61,7 @@ struct IOSMusicAppTests {
             session: session
         )
 
-        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.invalidResponse(200)) {
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.missingDownloadURL(.audio)) {
             try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .audio)
         }
     }
@@ -78,7 +78,220 @@ struct IOSMusicAppTests {
             session: session
         )
 
-        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.transportFailure) {
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.transportFailure("The bridge server could not be reached.")) {
+            try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .audio)
+        }
+    }
+
+    @Test
+    func youTubeExtractorBridgeClientRetriesStableResolveAfterTimeoutAndSucceeds() async throws {
+        let lock = NSLock()
+        var resolveRequestCount = 0
+        var healthRequestCount = 0
+
+        let session = makeBridgeTestSession { request in
+            lock.lock()
+            defer { lock.unlock() }
+
+            switch request.url?.path {
+            case "/resolve":
+                resolveRequestCount += 1
+                if resolveRequestCount == 1 {
+                    throw URLError(.timedOut)
+                }
+
+                return (
+                    HTTPURLResponse(
+                        url: URL(string: "https://bridge.example.com/resolve")!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data(
+                        """
+                        {
+                          "ok": true,
+                          "video": {
+                            "downloadURL": "https://redirector.googlevideo.com/video-retry",
+                            "mimeType": "video/mp4",
+                            "fileExtension": "mp4",
+                            "provider": "youtube",
+                            "providerItemId": "bridge-item"
+                          }
+                        }
+                        """.utf8
+                    )
+                )
+            case "/health":
+                healthRequestCount += 1
+                return (
+                    HTTPURLResponse(
+                        url: URL(string: "https://bridge.example.com/health")!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data(#"{"ok":true,"service":"youtube-extractor-bridge"}"#.utf8)
+                )
+            default:
+                Issue.record("Unexpected path: \(request.url?.path ?? "nil")")
+                throw URLError(.badURL)
+            }
+        }
+
+        let client = YouTubeExtractorBridgeClient(
+            configuration: TestYouTubeExtractorBridgeConfiguration(
+                baseURL: URL(string: "https://bridge.example.com")!,
+                apiStyle: .stableResolve,
+                resolveRetryDelay: 0
+            ),
+            session: session
+        )
+
+        let descriptor = try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .video)
+
+        #expect(resolveRequestCount == 2)
+        #expect(healthRequestCount == 1)
+        #expect(descriptor.remoteURL.absoluteString == "https://redirector.googlevideo.com/video-retry")
+    }
+
+    @Test
+    func youTubeExtractorBridgeClientSurfacesNetworkOffline() async throws {
+        let session = makeBridgeTestSession { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+        let client = YouTubeExtractorBridgeClient(
+            configuration: TestYouTubeExtractorBridgeConfiguration(
+                baseURL: URL(string: "https://bridge.example.com")!,
+                apiStyle: .stableResolve
+            ),
+            session: session
+        )
+
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.networkOffline) {
+            try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .audio)
+        }
+    }
+
+    @Test
+    func youTubeExtractorBridgeClientUsesStableResolveResponseWhenRemoteModeIsEnabled() async throws {
+        let session = makeBridgeTestSession { request in
+            #expect(request.url?.absoluteString == "https://bridge.example.com/resolve")
+            let body = try #require(request.httpBody)
+            let requestBody = try JSONDecoder().decode(BridgeStableResolveRequestBody.self, from: body)
+            #expect(requestBody.url == "https://www.youtube.com/watch?v=bridge-item")
+
+            return (
+                HTTPURLResponse(
+                    url: URL(string: "https://bridge.example.com/resolve")!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(
+                    """
+                    {
+                      "ok": true,
+                      "provider": "youtube",
+                      "providerItemId": "bridge-item",
+                      "sourcePageURL": "https://www.youtube.com/watch?v=bridge-item",
+                      "availableMediaTypes": ["audio", "video"],
+                      "audio": {
+                        "downloadURL": "https://bridge.example.com/downloads/audio/token-1",
+                        "mimeType": "audio/mp4",
+                        "fileExtension": "m4a",
+                        "provider": "youtube",
+                        "providerItemId": "bridge-item"
+                      },
+                      "video": {
+                        "downloadURL": "https://redirector.googlevideo.com/video-direct",
+                        "mimeType": "video/mp4",
+                        "fileExtension": "mp4",
+                        "provider": "youtube",
+                        "providerItemId": "bridge-item"
+                      }
+                    }
+                    """.utf8
+                )
+            )
+        }
+        let client = YouTubeExtractorBridgeClient(
+            configuration: TestYouTubeExtractorBridgeConfiguration(
+                baseURL: URL(string: "https://bridge.example.com")!,
+                apiStyle: .stableResolve
+            ),
+            session: session
+        )
+
+        let descriptor = try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .video)
+
+        #expect(descriptor.remoteURL.absoluteString == "https://redirector.googlevideo.com/video-direct")
+        #expect(descriptor.mimeType == "video/mp4")
+        #expect(descriptor.suggestedFileExtension == "mp4")
+    }
+
+    @Test
+    func youTubeExtractorBridgeClientRejectsStableResolveWhenDownloadURLIsMissing() async throws {
+        let session = makeBridgeTestSession { _ in
+            (
+                HTTPURLResponse(
+                    url: URL(string: "https://bridge.example.com/resolve")!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(
+                    """
+                    {
+                      "ok": true,
+                      "audio": {
+                        "mimeType": "audio/mp4",
+                        "fileExtension": "m4a",
+                        "provider": "youtube",
+                        "providerItemId": "bridge-item"
+                      }
+                    }
+                    """.utf8
+                )
+            )
+        }
+
+        let client = YouTubeExtractorBridgeClient(
+            configuration: TestYouTubeExtractorBridgeConfiguration(
+                baseURL: URL(string: "https://bridge.example.com")!,
+                apiStyle: .stableResolve
+            ),
+            session: session
+        )
+
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.missingDownloadURL(.audio)) {
+            try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .audio)
+        }
+    }
+
+    @Test
+    func youTubeExtractorBridgeClientMapsServerFailureToFriendlyError() async throws {
+        let session = makeBridgeTestSession { _ in
+            (
+                HTTPURLResponse(
+                    url: URL(string: "https://bridge.example.com/resolve")!,
+                    statusCode: 500,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"ok":false,"error":"yt-dlp extraction failed"}"#.utf8)
+            )
+        }
+
+        let client = YouTubeExtractorBridgeClient(
+            configuration: TestYouTubeExtractorBridgeConfiguration(
+                baseURL: URL(string: "https://bridge.example.com")!,
+                apiStyle: .stableResolve
+            ),
+            session: session
+        )
+
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.extractorFailed("yt-dlp extraction failed")) {
             try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .audio)
         }
     }
@@ -543,7 +756,7 @@ struct IOSMusicAppTests {
             availableMediaTypes: [.audio]
         )
 
-        await #expect(throws: DownloadOrchestratorError.downloadFailed) {
+        await #expect(throws: DownloadOrchestratorError.downloadFailed("The downloaded media file could not be prepared for offline playback.")) {
             try await orchestrator.startDownload(for: item, mediaType: .audio)
         }
 
@@ -563,7 +776,10 @@ struct IOSMusicAppTests {
     @MainActor
     func audioDownloadResolutionFailureMarksItemFailed() async throws {
         let repository = TestMediaLibraryRepository()
-        let provider = TestDownloadProvider(descriptorsByMediaType: [:], errorByMediaType: [.audio: ProviderError.downloadResolutionFailed])
+        let provider = TestDownloadProvider(
+            descriptorsByMediaType: [:],
+            errorByMediaType: [.audio: ProviderError.downloadResolutionFailed("The bridge server timed out.")]
+        )
         let orchestrator = DownloadOrchestrator(
             repository: repository,
             downloadProvider: provider,
@@ -582,7 +798,7 @@ struct IOSMusicAppTests {
             availableMediaTypes: [.audio]
         )
 
-        await #expect(throws: ProviderError.downloadResolutionFailed) {
+        await #expect(throws: ProviderError.downloadResolutionFailed("The bridge server timed out.")) {
             try await orchestrator.startDownload(for: item, mediaType: .audio)
         }
 
@@ -1215,7 +1431,7 @@ private final class TestDownloadProvider: DownloadProvider {
         }
 
         guard let descriptor = descriptorsByMediaType[mediaType] else {
-            throw ProviderError.downloadResolutionFailed
+            throw ProviderError.downloadResolutionFailed(nil)
         }
 
         return descriptor
@@ -1312,9 +1528,29 @@ private struct TestYouTubeExtractorBridgeClient: YouTubeExtractorBridgeResolving
 
 private struct TestYouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
     let baseURL: URL
+    var apiStyle: BridgeAPIStyle = .legacyResolveDownload
+    var healthRequestTimeout: TimeInterval = 0.1
+    var resolveRetryDelay: TimeInterval = 0
+    var maxRetries: Int = 1
 
     func bridgeBaseURL() throws -> URL {
         baseURL
+    }
+
+    func bridgeAPIStyle() -> BridgeAPIStyle {
+        apiStyle
+    }
+
+    func healthRequestTimeoutInterval() -> TimeInterval {
+        healthRequestTimeout
+    }
+
+    func resolveRetryDelayInterval() -> TimeInterval {
+        resolveRetryDelay
+    }
+
+    func maxResolveRetries() -> Int {
+        maxRetries
     }
 }
 
@@ -1376,6 +1612,10 @@ private final class BridgeURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private struct BridgeStableResolveRequestBody: Decodable {
+    let url: String
 }
 
 private final class TestLocalFileStorage: LocalFileStorage {

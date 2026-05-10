@@ -18,7 +18,19 @@ struct YouTubeBridgeDownloadProvider: DownloadProvider {
             throw ProviderError.unsupportedMediaType
         }
 
-        let resolvedDownload = try await bridgeClient.resolveDownload(for: item, mediaType: mediaType)
+        let resolvedDownload: BridgeResolvedDownload
+        do {
+            resolvedDownload = try await bridgeClient.resolveDownload(for: item, mediaType: mediaType)
+        } catch let error as ProviderError {
+            throw error
+        } catch {
+            logger.error(
+                "Bridge provider failed to resolve \(mediaType.rawValue, privacy: .public) for \(item.providerItemId, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            throw ProviderError.downloadResolutionFailed(message)
+        }
+
         logger.debug("Bridge provider mapped \(mediaType.rawValue, privacy: .public) descriptor for \(item.providerItemId, privacy: .public)")
 
         return DownloadDescriptor(

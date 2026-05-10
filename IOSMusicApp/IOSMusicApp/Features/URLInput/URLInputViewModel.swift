@@ -58,8 +58,8 @@ final class URLInputViewModel: ObservableObject {
                 errorMessage = "We could not read media details from that URL right now."
             case .mappingFailed:
                 errorMessage = "We found the media but could not map it into the app yet."
-            case .downloadResolutionFailed:
-                errorMessage = "The provider reported a download resolution failure."
+            case .downloadResolutionFailed(let message):
+                errorMessage = message ?? "The provider reported a download resolution failure."
             case .unsupportedMediaType:
                 errorMessage = "The resolved media type is not supported."
             case .notImplementedInSpike:

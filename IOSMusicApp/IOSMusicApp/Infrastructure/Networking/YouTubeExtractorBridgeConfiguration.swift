@@ -3,6 +3,43 @@ import OSLog
 
 protocol YouTubeExtractorBridgeConfiguring {
     func bridgeBaseURL() throws -> URL
+    func bridgeAPIStyle() -> BridgeAPIStyle
+    func resolveRequestTimeoutInterval() -> TimeInterval
+    func healthRequestTimeoutInterval() -> TimeInterval
+    func downloadRequestTimeoutInterval() -> TimeInterval
+    func downloadResourceTimeoutInterval() -> TimeInterval
+    func resolveRetryDelayInterval() -> TimeInterval
+    func maxResolveRetries() -> Int
+}
+
+extension YouTubeExtractorBridgeConfiguring {
+    func bridgeAPIStyle() -> BridgeAPIStyle {
+        .legacyResolveDownload
+    }
+
+    func resolveRequestTimeoutInterval() -> TimeInterval {
+        20
+    }
+
+    func healthRequestTimeoutInterval() -> TimeInterval {
+        8
+    }
+
+    func downloadRequestTimeoutInterval() -> TimeInterval {
+        60
+    }
+
+    func downloadResourceTimeoutInterval() -> TimeInterval {
+        900
+    }
+
+    func resolveRetryDelayInterval() -> TimeInterval {
+        1
+    }
+
+    func maxResolveRetries() -> Int {
+        1
+    }
 }
 
 struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
@@ -65,6 +102,34 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
         #endif
 
         return url
+    }
+
+    func bridgeAPIStyle() -> BridgeAPIStyle {
+        bridgeConfig.apiStyle
+    }
+
+    func resolveRequestTimeoutInterval() -> TimeInterval {
+        bridgeConfig.resolveRequestTimeout
+    }
+
+    func downloadRequestTimeoutInterval() -> TimeInterval {
+        bridgeConfig.downloadRequestTimeout
+    }
+
+    func downloadResourceTimeoutInterval() -> TimeInterval {
+        bridgeConfig.downloadResourceTimeout
+    }
+
+    func healthRequestTimeoutInterval() -> TimeInterval {
+        bridgeConfig.healthRequestTimeout
+    }
+
+    func resolveRetryDelayInterval() -> TimeInterval {
+        bridgeConfig.resolveRetryDelay
+    }
+
+    func maxResolveRetries() -> Int {
+        bridgeConfig.maxResolveRetries
     }
 
     private func resolveBridgeBaseURL() -> BridgeBaseURLResolution {
