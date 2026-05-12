@@ -1,3 +1,4 @@
+import type { Request, Response } from "express";
 import { Router } from "express";
 
 import { InvalidRequestError } from "../errors/httpErrors.js";
@@ -15,7 +16,7 @@ export const youtubeAudioProxyService = new YouTubeAudioProxyService();
 const youtubeExtractorService = new YouTubeExtractorService(youtubeAudioProxyService);
 const supportedMediaTypes = new Set<MediaType>(["audio", "video"]);
 
-resolveDownloadRouter.post("/", async (req, res) => {
+resolveDownloadRouter.post("/", async (req: Request, res: Response) => {
   const body = validateResolveDownloadRequest(req.body);
   const host = req.get("host");
 

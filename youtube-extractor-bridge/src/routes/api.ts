@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-import type { Request, Response } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { Router } from "express";
 
 import {
@@ -22,7 +22,7 @@ export const apiRouter = Router();
 
 const youtubeExtractorService = new YouTubeExtractorService(youtubeAudioProxyService);
 
-apiRouter.post("/resolve", async (req, res) => {
+apiRouter.post("/resolve", async (req: Request, res: Response) => {
   res.locals.apiResponseShape = "standard";
   const body = validateResolveBody(req.body);
   const providerItemId = inferProviderItemId(body.url);
@@ -78,101 +78,107 @@ apiRouter.post("/resolve", async (req, res) => {
   res.status(200).json(response);
 });
 
-apiRouter.post("/download/audio", async (req, res, next) => {
-  res.locals.apiResponseShape = "standard";
-  const body = validateDownloadBody(req.body);
-  const providerItemId = normalizedString(body.providerItemId) ?? inferProviderItemId(body.url);
-  const title = normalizedString(body.title);
+apiRouter.post(
+  "/download/audio",
+  async (req: Request, res: Response, next: NextFunction) => {
+    res.locals.apiResponseShape = "standard";
+    const body = validateDownloadBody(req.body);
+    const providerItemId = normalizedString(body.providerItemId) ?? inferProviderItemId(body.url);
+    const title = normalizedString(body.title);
 
-  logRequestStart("api_audio_download_started", req, {
-    providerItemId,
-    sourcePageURL: body.url,
-    title
-  });
-
-  try {
-    const preparedDownload = await youtubeAudioProxyService.prepareAudioDownloadFromSource({
+    logRequestStart("api_audio_download_started", req, {
       providerItemId,
       sourcePageURL: body.url,
       title
     });
-    let cleanedUp = false;
 
-    const cleanup = async () => {
-      if (cleanedUp) {
-        return;
-      }
+    try {
+      const preparedDownload = await youtubeAudioProxyService.prepareAudioDownloadFromSource({
+        providerItemId,
+        sourcePageURL: body.url,
+        title
+      });
+      let cleanedUp = false;
 
-      cleanedUp = true;
-      await preparedDownload.cleanup();
-    };
+      const cleanup = async () => {
+        if (cleanedUp) {
+          return;
+        }
 
-    res.setHeader("Content-Type", "audio/mp4");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${preparedDownload.fileName}"`
-    );
+        cleanedUp = true;
+        await preparedDownload.cleanup();
+      };
 
-    preparedDownload.stream.on("error", async (error) => {
-      await cleanup();
+      res.setHeader("Content-Type", "audio/mp4");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${preparedDownload.fileName}"`
+      );
+
+      preparedDownload.stream.on("error", async (error) => {
+        await cleanup();
+        next(error);
+      });
+
+      preparedDownload.stream.on("close", async () => {
+        await cleanup();
+      });
+
+      res.on("close", async () => {
+        await cleanup();
+      });
+
+      logger.info("api_audio_download_succeeded", {
+        providerItemId,
+        sourcePageURL: body.url,
+        fileName: preparedDownload.fileName
+      });
+
+      preparedDownload.stream.pipe(res);
+    } catch (error) {
       next(error);
-    });
+    }
+  }
+);
 
-    preparedDownload.stream.on("close", async () => {
-      await cleanup();
-    });
+apiRouter.post(
+  "/download/video",
+  async (req: Request, res: Response, next: NextFunction) => {
+    res.locals.apiResponseShape = "standard";
+    const body = validateDownloadBody(req.body);
+    const providerItemId = normalizedString(body.providerItemId) ?? inferProviderItemId(body.url);
+    const title = normalizedString(body.title);
 
-    res.on("close", async () => {
-      await cleanup();
-    });
-
-    logger.info("api_audio_download_succeeded", {
+    logRequestStart("api_video_download_started", req, {
       providerItemId,
       sourcePageURL: body.url,
-      fileName: preparedDownload.fileName
+      title
     });
 
-    preparedDownload.stream.pipe(res);
-  } catch (error) {
-    next(error);
+    try {
+      const resolvedVideo = await youtubeExtractorService.resolveDownload({
+        bridgeBaseURL: buildBridgeBaseURL(req),
+        providerItemId,
+        mediaType: "video",
+        sourcePageURL: body.url
+      });
+
+      await streamResolvedDownload({
+        download: resolvedVideo,
+        fallbackFileNameBase: title ?? providerItemId,
+        res
+      });
+
+      logger.info("api_video_download_succeeded", {
+        providerItemId,
+        sourcePageURL: body.url,
+        downloadURL: resolvedVideo.downloadURL
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-});
-
-apiRouter.post("/download/video", async (req, res, next) => {
-  res.locals.apiResponseShape = "standard";
-  const body = validateDownloadBody(req.body);
-  const providerItemId = normalizedString(body.providerItemId) ?? inferProviderItemId(body.url);
-  const title = normalizedString(body.title);
-
-  logRequestStart("api_video_download_started", req, {
-    providerItemId,
-    sourcePageURL: body.url,
-    title
-  });
-
-  try {
-    const resolvedVideo = await youtubeExtractorService.resolveDownload({
-      bridgeBaseURL: buildBridgeBaseURL(req),
-      providerItemId,
-      mediaType: "video",
-      sourcePageURL: body.url
-    });
-
-    await streamResolvedDownload({
-      download: resolvedVideo,
-      fallbackFileNameBase: title ?? providerItemId,
-      res
-    });
-
-    logger.info("api_video_download_succeeded", {
-      providerItemId,
-      sourcePageURL: body.url,
-      downloadURL: resolvedVideo.downloadURL
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+);
 
 const validateResolveBody = (value: unknown): ResolveRequestBody => {
   if (!isRecord(value)) {
