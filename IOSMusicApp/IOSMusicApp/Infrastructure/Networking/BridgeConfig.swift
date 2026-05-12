@@ -8,11 +8,11 @@ enum BridgeAPIStyle {
 struct BridgeConfig {
     static let current = BridgeConfig()
 
-    // Set this to your deployed bridge server when you want the app to use remote resolution.
-    // Leave it empty to keep the current local bridge fallback behavior.
-    private static let configuredRemoteBaseURL = "https://zone-exile-rework.ngrok-free.dev"
+    private static let configuredRemoteBaseURL = "https://dfom.onrender.com"
+    private static let configuredAPIStyle: BridgeAPIStyle = .legacyResolveDownload
 
     let remoteBaseURL: String?
+    let apiStyle: BridgeAPIStyle
     let environmentOverrideKey: String
     let legacyInfoDictionaryKey: String
     let debugDeviceHostInfoDictionaryKey: String
@@ -27,6 +27,7 @@ struct BridgeConfig {
 
     init(
         remoteBaseURL: String? = BridgeConfig.configuredRemoteBaseURL,
+        apiStyle: BridgeAPIStyle = BridgeConfig.configuredAPIStyle,
         environmentOverrideKey: String = "YOUTUBE_EXTRACTOR_BRIDGE_BASE_URL",
         legacyInfoDictionaryKey: String = "YOUTUBE_EXTRACTOR_BRIDGE_BASE_URL",
         debugDeviceHostInfoDictionaryKey: String = "YOUTUBE_EXTRACTOR_BRIDGE_DEBUG_DEVICE_HOST",
@@ -40,6 +41,7 @@ struct BridgeConfig {
         maxResolveRetries: Int = 1
     ) {
         self.remoteBaseURL = Self.normalizedString(remoteBaseURL)
+        self.apiStyle = apiStyle
         self.environmentOverrideKey = environmentOverrideKey
         self.legacyInfoDictionaryKey = legacyInfoDictionaryKey
         self.debugDeviceHostInfoDictionaryKey = debugDeviceHostInfoDictionaryKey
@@ -51,10 +53,6 @@ struct BridgeConfig {
         self.downloadResourceTimeout = downloadResourceTimeout
         self.resolveRetryDelay = resolveRetryDelay
         self.maxResolveRetries = maxResolveRetries
-    }
-
-    var apiStyle: BridgeAPIStyle {
-        remoteBaseURL == nil ? .legacyResolveDownload : .stableResolve
     }
 
     private static func normalizedString(_ value: String?) -> String? {

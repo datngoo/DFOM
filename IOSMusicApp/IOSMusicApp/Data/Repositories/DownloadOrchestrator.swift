@@ -191,6 +191,15 @@ final class DownloadOrchestrator: DownloadOrchestrating {
 
         let temporaryFileURL: URL
         do {
+            logger.info(
+                """
+                Download request prepared: method=GET \
+                url=\(descriptor.remoteURL.absoluteString, privacy: .public) \
+                mediaType=\(transferMediaType.rawValue, privacy: .public) \
+                itemID=\(item.providerItemId, privacy: .public) \
+                sourceURL=\(item.sourcePageURL.absoluteString, privacy: .public)
+                """
+            )
             temporaryFileURL = try await downloader.download(
                 from: descriptor.remoteURL,
                 mediaType: transferMediaType,

@@ -131,10 +131,11 @@ struct YouTubeExtractorBridgeClient: YouTubeExtractorBridgeResolving {
 
         logger.info(
             """
-            Bridge request started: baseURL=\(baseURL.absoluteString, privacy: .public) \
-            path=\(endpointURL.path, privacy: .public) \
+            Bridge request started: method=POST \
+            url=\(endpointURL.absoluteString, privacy: .public) \
             mediaType=\(mediaType.rawValue, privacy: .public) \
             itemID=\(item.providerItemId, privacy: .public) \
+            sourceURL=\(item.sourcePageURL.absoluteString, privacy: .public) \
             attempt=\(attemptNumber, privacy: .public)
             """
         )
