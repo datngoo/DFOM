@@ -128,7 +128,7 @@ struct LibraryView: View {
                         )
                     } else {
                         ForEach(displayedMediaItems) { item in
-                            if viewModel.selectedTab == .videos, isPlayableVideoItem(item) {
+                            if viewModel.selectedTab == .videos, shouldShowVideoOptionsRow(for: item) {
                                 videoRow(for: item)
                             } else {
                                 NavigationLink {
@@ -299,22 +299,24 @@ struct LibraryView: View {
             .disabled(!isPlayableAudioItem(item))
 
             Menu {
-                Button {
-                    itemPendingMetadataEdit = item
-                } label: {
-                    Label("Edit Info", systemImage: "pencil")
+                if item.downloadStatus != .failed {
+                    Button {
+                        itemPendingMetadataEdit = item
+                    } label: {
+                        Label("Edit Info", systemImage: "pencil")
+                    }
+                    Button {
+                        itemPendingPlaylistSelection = item
+                    } label: {
+                        Label("Add to Playlist", systemImage: "text.badge.plus")
+                    }
+                    Button {
+                        queueSongNext(item)
+                    } label: {
+                        Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    }
+                    .disabled(!isPlayableAudioItem(item))
                 }
-                Button {
-                    itemPendingPlaylistSelection = item
-                } label: {
-                    Label("Add to Playlist", systemImage: "text.badge.plus")
-                }
-                Button {
-                    queueSongNext(item)
-                } label: {
-                    Label("Play Next", systemImage: "text.line.first.and.arrowtriangle.forward")
-                }
-                .disabled(!isPlayableAudioItem(item))
                 Button(role: .destructive) {
                     itemPendingDeletion = item
                 } label: {
@@ -350,12 +352,13 @@ struct LibraryView: View {
             .disabled(!isPlayableVideoItem(item))
 
             Menu {
-                Button {
-                    itemPendingVideoPlayback = item
-                } label: {
-                    Label("Play", systemImage: "play.fill")
+                if isPlayableVideoItem(item) {
+                    Button {
+                        itemPendingVideoPlayback = item
+                    } label: {
+                        Label("Play", systemImage: "play.fill")
+                    }
                 }
-                .disabled(!isPlayableVideoItem(item))
                 Button(role: .destructive) {
                     itemPendingDeletion = item
                 } label: {
@@ -502,6 +505,10 @@ struct LibraryView: View {
 
     private func isPlayableVideoItem(_ item: MediaItem) -> Bool {
         isPlayableLibraryItem(item, expectedMediaType: .video)
+    }
+
+    private func shouldShowVideoOptionsRow(for item: MediaItem) -> Bool {
+        item.mediaType == .video && (isPlayableVideoItem(item) || item.downloadStatus == .failed)
     }
 
     private func isPlayableLibraryItem(_ item: MediaItem, expectedMediaType: MediaType) -> Bool {

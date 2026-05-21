@@ -4,7 +4,16 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { env } from "../config/env.js";
-import { ExtractorFailureError, NoDownloadableMediaError } from "../errors/httpErrors.js";
+import {
+  ExtractorFailureError,
+  HttpError,
+  InternalExtractorError,
+  NoDownloadableMediaError,
+  ProviderBlockedError,
+  VideoAgeRestrictedError,
+  VideoPrivateError,
+  VideoUnavailableError
+} from "../errors/httpErrors.js";
 import {
   buildFormatSelector,
   chooseDownloadCandidate,
@@ -83,12 +92,11 @@ export class YouTubeExtractorService {
         providerItemId: input.providerItemId
       };
     } catch (error) {
-      if (error instanceof NoDownloadableMediaError) {
+      if (error instanceof HttpError) {
         throw error;
       }
 
-      const message = error instanceof Error ? error.message : "Unknown extraction failure.";
-      throw new ExtractorFailureError(`YouTube extraction failed: ${message}`);
+      throw new InternalExtractorError("The extractor failed unexpectedly while resolving media.");
     }
   }
 
@@ -118,20 +126,7 @@ export class YouTubeExtractorService {
       return JSON.parse(stdout) as YtDlpInfo;
     } catch (error) {
       const message = extractProcessErrorMessage(error);
-
-      if (this.isNoMediaError(message)) {
-        if (input.mediaType === "audio") {
-          throw new NoDownloadableMediaError(
-            "No downloadable audio stream is available for this YouTube item."
-          );
-        }
-
-        throw new NoDownloadableMediaError(
-          "No downloadable progressive video stream is available for this YouTube item."
-        );
-      }
-
-      throw new ExtractorFailureError(message);
+      throw classifyYouTubeExtractorError(message, input.mediaType);
     }
   }
 
@@ -155,19 +150,61 @@ export class YouTubeExtractorService {
     };
   }
 
-  private isNoMediaError(message: string): boolean {
-    const loweredMessage = message.toLowerCase();
+}
 
-    return (
-      loweredMessage.includes("requested format is not available") ||
-      loweredMessage.includes("requested format not available") ||
-      loweredMessage.includes("no video formats found") ||
-      loweredMessage.includes("unsupported url") ||
-      loweredMessage.includes("drm") ||
-      loweredMessage.includes("only images are available for download")
+export const classifyYouTubeExtractorError = (message: string, mediaType: MediaType): HttpError => {
+  const loweredMessage = message.toLowerCase();
+
+  if (loweredMessage.includes("private video") || loweredMessage.includes("this video is private")) {
+    return new VideoPrivateError();
+  }
+
+  if (
+    loweredMessage.includes("age-restricted") ||
+    loweredMessage.includes("age restricted") ||
+    loweredMessage.includes("confirm your age")
+  ) {
+    return new VideoAgeRestrictedError();
+  }
+
+  if (
+    loweredMessage.includes("this video is not available") ||
+    loweredMessage.includes("video unavailable") ||
+    loweredMessage.includes("has been removed") ||
+    loweredMessage.includes("removed by the uploader") ||
+    loweredMessage.includes("deleted")
+  ) {
+    return new VideoUnavailableError();
+  }
+
+  if (
+    loweredMessage.includes("requested format is not available") ||
+    loweredMessage.includes("requested format not available") ||
+    loweredMessage.includes("no video formats found") ||
+    loweredMessage.includes("unsupported url") ||
+    loweredMessage.includes("drm") ||
+    loweredMessage.includes("only images are available for download")
+  ) {
+    return new NoDownloadableMediaError(
+      mediaType === "audio"
+        ? "No downloadable audio stream is available for this YouTube item."
+        : "No downloadable progressive video stream is available for this YouTube item."
     );
   }
-}
+
+  if (
+    loweredMessage.includes("sign in to confirm you're not a bot") ||
+    loweredMessage.includes("sign in to confirm you’re not a bot") ||
+    loweredMessage.includes("captcha") ||
+    loweredMessage.includes("too many requests") ||
+    loweredMessage.includes("http error 429") ||
+    loweredMessage.includes("blocked")
+  ) {
+    return new ProviderBlockedError();
+  }
+
+  return new ExtractorFailureError("This YouTube video is unavailable or cannot be downloaded.");
+};
 
 const buildExecutablePath = (): string => {
   const preferredPrefixes = ["/opt/homebrew/bin", "/usr/local/bin"];

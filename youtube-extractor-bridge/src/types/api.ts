@@ -17,13 +17,21 @@ export interface ResolveDownloadSuccessResponse {
 }
 
 export interface ErrorResponse {
-  error: "invalid_request" | "no_downloadable_media" | "extractor_failure";
+  error:
+    | "invalid_request"
+    | "VIDEO_UNAVAILABLE"
+    | "VIDEO_PRIVATE"
+    | "VIDEO_AGE_RESTRICTED"
+    | "FORMAT_UNAVAILABLE"
+    | "PROVIDER_BLOCKED"
+    | "EXTRACTOR_FAILED";
   message: string;
 }
 
 export interface HealthResponse {
   status: "ok";
   service: string;
+  host: string;
   port: number;
   timestamp: string;
 }

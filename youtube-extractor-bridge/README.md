@@ -82,6 +82,8 @@ Optional environment variables:
 
 For real-device testing, do not bind the bridge only to `127.0.0.1`, because a physical iPhone cannot reach the Mac through that loopback address.
 
+When the bridge starts, it logs the bound host/port, the local health URL, and LAN health URL examples. For physical iPhone testing, open one of the LAN health URLs in iPhone Safari before starting a download in the app.
+
 ## Health check
 
 Mac or Simulator:
@@ -102,10 +104,40 @@ Expected response:
 {
   "status": "ok",
   "service": "youtube-extractor-bridge",
+  "host": "0.0.0.0",
   "port": 8080,
   "timestamp": "2026-04-10T00:00:00.000Z"
 }
 ```
+
+## Real iPhone local bridge checklist
+
+1. Run bridge:
+   ```bash
+   npm run dev
+   ```
+2. On Mac test:
+   ```bash
+   curl http://127.0.0.1:8080/health
+   ```
+3. Get Mac LAN IP:
+   ```bash
+   ipconfig getifaddr en0
+   ```
+4. On Mac test LAN URL:
+   ```bash
+   curl http://<MAC_LAN_IP>:8080/health
+   ```
+5. On iPhone Safari test:
+   ```text
+   http://<MAC_LAN_IP>:8080/health
+   ```
+6. If iPhone Safari cannot open it:
+   - Make sure iPhone and Mac are on the same Wi-Fi
+   - Disable VPN
+   - Disable macOS Firewall temporarily or allow Node/Terminal incoming connections
+   - Make sure the bridge listens on `0.0.0.0`
+   - Recheck the Mac LAN IP because it can change
 
 ## Resolve download examples
 
@@ -158,21 +190,30 @@ Invalid request, HTTP `400`:
 }
 ```
 
-No downloadable media, HTTP `422`:
+Known extractor or format failure, HTTP `404`, `410`, or `422`:
 
 ```json
 {
-  "error": "no_downloadable_media",
-  "message": "No downloadable progressive video stream is available for this YouTube item."
+  "error": "VIDEO_UNAVAILABLE",
+  "message": "This YouTube video is unavailable or cannot be downloaded."
 }
 ```
 
-Extractor failure, HTTP `500`:
+Supported error codes:
+
+- `VIDEO_UNAVAILABLE`
+- `VIDEO_PRIVATE`
+- `VIDEO_AGE_RESTRICTED`
+- `FORMAT_UNAVAILABLE`
+- `PROVIDER_BLOCKED`
+- `EXTRACTOR_FAILED`
+
+Unexpected internal bridge failure, HTTP `500`:
 
 ```json
 {
-  "error": "extractor_failure",
-  "message": "YouTube extraction failed: ..."
+  "error": "EXTRACTOR_FAILED",
+  "message": "The extractor failed unexpectedly while resolving media."
 }
 ```
 

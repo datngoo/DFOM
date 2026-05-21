@@ -9,6 +9,7 @@ healthRouter.get("/", (_req, res) => {
   const payload: HealthResponse = {
     status: "ok",
     service: "youtube-extractor-bridge",
+    host: env.host,
     port: env.port,
     timestamp: new Date().toISOString()
   };

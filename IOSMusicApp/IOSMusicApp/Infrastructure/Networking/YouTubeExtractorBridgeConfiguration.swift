@@ -25,6 +25,7 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
     static let debugDeviceHostInfoDictionaryKey = "YOUTUBE_EXTRACTOR_BRIDGE_DEBUG_DEVICE_HOST"
     static let debugPortInfoDictionaryKey = "YOUTUBE_EXTRACTOR_BRIDGE_DEBUG_PORT"
     static let defaultDebugPort = 8080
+    static let defaultDebugDeviceHost = "192.168.100.162"
 
     private let bundle: Bundle
     private let processInfo: ProcessInfo
@@ -107,10 +108,8 @@ struct YouTubeExtractorBridgeConfiguration: YouTubeExtractorBridgeConfiguring {
     private func debugDeviceBaseURL() -> String? {
         #if DEBUG
         #if !targetEnvironment(simulator)
-        guard let host = normalizedString(bundle.object(forInfoDictionaryKey: Self.debugDeviceHostInfoDictionaryKey) as? String) else {
-            return nil
-        }
-
+        let host = normalizedString(bundle.object(forInfoDictionaryKey: Self.debugDeviceHostInfoDictionaryKey) as? String)
+            ?? Self.defaultDebugDeviceHost
         let port = normalizedPort(bundle.object(forInfoDictionaryKey: Self.debugPortInfoDictionaryKey))
         return "http://\(host):\(port)"
         #else

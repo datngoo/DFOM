@@ -113,6 +113,18 @@ final class MediaDetailViewModel: ObservableObject {
             case .downloadFailed:
                 setErrorMessage("The \(mediaType.rawValue) download failed.", for: mediaType)
             }
+        } catch let error as YouTubeExtractorBridgeClient.ClientError {
+            logger.error("YouTube bridge error while starting \(mediaType.rawValue, privacy: .public) download for \(self.item.providerItemId, privacy: .public): \(String(describing: error), privacy: .public)")
+            setLocalState(
+                DownloadStateSnapshot(
+                    mediaType: mediaType,
+                    status: .failed,
+                    progress: nil,
+                    localFilePath: nil
+                ),
+                for: mediaType
+            )
+            setErrorMessage(error.localizedDescription, for: mediaType)
         } catch let error as ProviderError {
             logger.error("Provider error while starting \(mediaType.rawValue, privacy: .public) download for \(self.item.providerItemId, privacy: .public): \(String(describing: error), privacy: .public)")
             setLocalState(

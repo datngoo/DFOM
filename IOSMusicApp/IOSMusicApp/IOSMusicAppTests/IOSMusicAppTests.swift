@@ -44,7 +44,7 @@ struct IOSMusicAppTests {
     @Test
     func youTubeExtractorBridgeClientRejectsInvalidResponse() async throws {
         let session = makeBridgeTestSession { _ in
-            (
+            return (
                 HTTPURLResponse(
                     url: URL(string: "https://bridge.example.com/resolve-download")!,
                     statusCode: 200,
@@ -67,6 +67,43 @@ struct IOSMusicAppTests {
     }
 
     @Test
+    func youTubeExtractorBridgeClientDecodesStructuredExtractorError() async throws {
+        let session = makeBridgeTestSession { request in
+            if request.url?.path == "/health" {
+                return (
+                    HTTPURLResponse(
+                        url: URL(string: "https://bridge.example.com/health")!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!,
+                    Data(#"{"status":"ok"}"#.utf8)
+                )
+            }
+
+            return (
+                HTTPURLResponse(
+                    url: URL(string: "https://bridge.example.com/resolve-download")!,
+                    statusCode: 410,
+                    httpVersion: nil,
+                    headerFields: nil
+                )!,
+                Data(#"{"error":"VIDEO_UNAVAILABLE","message":"This YouTube video is unavailable or cannot be downloaded."}"#.utf8)
+            )
+        }
+        let client = YouTubeExtractorBridgeClient(
+            configuration: TestYouTubeExtractorBridgeConfiguration(
+                baseURL: URL(string: "https://bridge.example.com")!
+            ),
+            session: session
+        )
+
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.extractorFailure(.videoUnavailable, "This YouTube video is unavailable or cannot be downloaded.")) {
+            try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .video)
+        }
+    }
+
+    @Test
     func youTubeExtractorBridgeClientSurfacesTransportFailure() async throws {
         let session = makeBridgeTestSession { _ in
             throw URLError(.cannotConnectToHost)
@@ -78,7 +115,7 @@ struct IOSMusicAppTests {
             session: session
         )
 
-        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.transportFailure) {
+        await #expect(throws: YouTubeExtractorBridgeClient.ClientError.healthCheckFailed(URL(string: "https://bridge.example.com/health")!, .cannotConnectToHost)) {
             try await client.resolveDownload(for: makeBridgeTestItem(), mediaType: .audio)
         }
     }

@@ -8,6 +8,7 @@ import {
   inferMimeType
 } from "../dist/services/youtubeFormatSelection.js";
 import { buildAudioDownloadArgs } from "../dist/services/youtubeAudioProxyService.js";
+import { classifyYouTubeExtractorError } from "../dist/services/youtubeExtractorService.js";
 
 test("audio probe selector prefers bestaudio m4a first", () => {
   assert.match(buildFormatSelector("audio"), /ext=m4a/);
@@ -64,4 +65,24 @@ test("audio download command remuxes into a proper m4a file", () => {
     "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
   ]);
   assert.match(args[0], /youtube-dl-exec\/bin\/yt-dlp$/);
+});
+
+test("youtube extractor unavailable errors map to structured 410 responses", () => {
+  const error = classifyYouTubeExtractorError(
+    "ERROR: [youtube] UHVl75dWzwY: This video is not available",
+    "video"
+  );
+
+  assert.equal(error.statusCode, 410);
+  assert.equal(error.errorCode, "VIDEO_UNAVAILABLE");
+});
+
+test("youtube extractor format errors map to structured 422 responses", () => {
+  const error = classifyYouTubeExtractorError(
+    "ERROR: requested format is not available",
+    "audio"
+  );
+
+  assert.equal(error.statusCode, 422);
+  assert.equal(error.errorCode, "FORMAT_UNAVAILABLE");
 });
